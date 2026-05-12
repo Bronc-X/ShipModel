@@ -12,6 +12,7 @@ const apiPort = await getFreePort(6200);
 const webPort = await getFreePort(apiPort + 1);
 const chromiumExecutablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || findLocalChromium();
 const children = [];
+let shuttingDown = false;
 
 try {
   await run(npmCommand, ["run", "typecheck"]);
@@ -35,6 +36,7 @@ try {
     ...(chromiumExecutablePath ? { PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH: chromiumExecutablePath } : {})
   });
 } finally {
+  shuttingDown = true;
   for (const child of children.reverse()) {
     killChildTree(child);
   }
@@ -52,7 +54,7 @@ function spawnManaged(command, args, env = {}) {
   });
   children.push(child);
   child.on("exit", (code) => {
-    if (code && code !== 0) {
+    if (!shuttingDown && code && code !== 0) {
       process.stderr.write(`[baseline] managed process exited: ${command} ${args.join(" ")} (${code})\n`);
     }
   });
