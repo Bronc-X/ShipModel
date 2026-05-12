@@ -1,0 +1,45 @@
+{
+  "name": "printable-model-demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"npm:dev:api\" \"npm:dev:toybox\" \"npm:dev:lusie\"",
+    "dev:web": "npm run dev:toybox",
+    "dev:toybox": "vite --host 0.0.0.0 --port 5173 --strictPort",
+    "dev:lusie": "set VITE_APP=lusie&& vite --host 0.0.0.0 --port 5175 --strictPort",
+    "dev:api": "tsx watch --env-file-if-exists=.env.local server/index.ts",
+    "build": "tsc -b && vite build",
+    "build:toybox": "tsc -b && vite build",
+    "build:lusie": "tsc -b && set VITE_APP=lusie&& vite build --outDir dist-lusie",
+    "preview": "vite preview --host 0.0.0.0",
+    "typecheck": "tsc -b",
+    "test:baseline": "node scripts/run-baseline.mjs",
+    "test:prompts": "node --import tsx --test tests/prompt-policy.test.ts",
+    "test:e2e": "playwright test",
+    "test:contract": "node scripts/api-contract-test.mjs"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^5.1.1",
+    "concurrently": "^9.2.1",
+    "cors": "^2.8.5",
+    "express": "^5.2.1",
+    "lucide-react": "^0.562.0",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "three": "^0.182.0",
+    "tsx": "^4.21.0",
+    "undici": "^8.2.0",
+    "vite": "^7.3.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.0.3",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@types/three": "^0.182.0",
+    "typescript": "^5.9.3"
+  }
+}

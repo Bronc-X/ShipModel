@@ -1,0 +1,15 @@
+node_modules
+dist
+dist-lusie
+dist-server
+runs
+test-results
+playwright-report
+.env
+.env.local
+.DS_Store
+*.tsbuildinfo
+.gstack/
+*.log
+*.out.log
+*.err.log
