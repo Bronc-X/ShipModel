@@ -29,7 +29,7 @@ import {
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { generateConcepts, generateModel, getHandshake, getRun } from "../api";
 import { ModelViewer } from "../components/ModelViewer";
-import type { Concept, ConceptProgressEvent, HandshakeResponse, ModelCategory, ModelRequest, ModelRun, ModelSubtype } from "../types";
+import type { Concept, ConceptProgressEvent, HandshakeResponse, ModelCategory, ModelJobEvent, ModelRequest, ModelRun, ModelSubtype } from "../types";
 import { categories, colors, defaultInput, defaultInputForSubtype, defaultPrompts, firstStyle, firstSubtype, stylesByCategory } from "./catalog";
 import { conceptPreviewAssets } from "./conceptPreviewAssets";
 import {
@@ -41,7 +41,7 @@ import {
   type LocalHistoryEntry,
   type MembershipSnapshot
 } from "./localHistory";
-import { getModelBuildMockState } from "./modelBuildProgress";
+import { buildModelTimeline, getPipelineState } from "./modelJobProgress";
 import { parseRoute, routePaths, type RouteName, type RouteState } from "./routes";
 import { getSupabaseSyncState, syncHistoryEntry } from "./supabaseSync";
 
@@ -61,13 +61,6 @@ const previewModeLabels: Record<PreviewMode, string> = {
   wireframe: "尺寸网格"
 };
 
-type ModelBuildLog = {
-  tag: string;
-  message: string;
-  detail: string;
-  tone: "queued" | "active" | "done" | "warn";
-};
-
 type DetailRenderView = "front" | "side" | "top" | "joint";
 
 type InspectionProfile = {
@@ -75,24 +68,6 @@ type InspectionProfile = {
   renders: Array<{ label: string; note: string; view: DetailRenderView }>;
   advice: string[];
 };
-
-const modelBuildLogs: ModelBuildLog[] = [
-  { tag: "QUEUE", message: "已接收 STL 生成请求。", detail: "锁定 runId、conceptId 和目标尺寸。", tone: "done" },
-  { tag: "INPUT", message: "读取推荐概念图与色彩参数。", detail: "保留主体轮廓、双色涂装和打印尺寸。", tone: "done" },
-  { tag: "UPLOAD", message: "正在准备 Tripo image-to-model 输入。", detail: "校验图片类型、大小和可访问性。", tone: "active" },
-  { tag: "TRIPO", message: "已提交图像转模型任务。", detail: "等待远端返回 task_id。", tone: "done" },
-  { tag: "POLL", message: "轮询 Tripo 任务状态：queued。", detail: "几何体生成队列已进入等待区。", tone: "active" },
-  { tag: "POLL", message: "轮询 Tripo 任务状态：running。", detail: "正在推断主体体块和可闭合表面。", tone: "active" },
-  { tag: "MESH", message: "检测到初始网格资产。", detail: "开始整理壳体、边界和悬空细节。", tone: "active" },
-  { tag: "MESH", message: "正在合并小型装饰件。", detail: "减少孤立零件，提高后续切片稳定性。", tone: "active" },
-  { tag: "CONVERT", message: "提交 STL 转换任务。", detail: "把模型资产转换成可下载打印格式。", tone: "done" },
-  { tag: "POLL", message: "轮询 STL 转换状态：running。", detail: "等待远端写出 STL 文件 URL。", tone: "active" },
-  { tag: "RENDER", message: "生成局部渲染与细节取样。", detail: "准备正视、侧视、俯视和连接位检查样张。", tone: "active" },
-  { tag: "RENDER", message: "写入模型检查台拆解视图。", detail: "模型拆解图会和 STL 一起进入检查台。", tone: "done" },
-  { tag: "CHECK", message: "预检下载地址和文件响应。", detail: "确认返回内容不是空文件或错误页。", tone: "active" },
-  { tag: "CHECK", message: "记录模型检查台所需元数据。", detail: "尺寸、分类和打印建议准备就绪。", tone: "done" },
-  { tag: "WAIT", message: "保持连接，等待最终完成信号。", detail: "最近日志会持续刷新，不会中断当前任务。", tone: "warn" }
-];
 
 const modelBuildTokens = [
   "queue", "task", "image", "token", "upload", "Tripo", "poll", "mesh", "shell", "surface",
@@ -114,6 +89,7 @@ export function ToyBoxApp() {
   const [handshake, setHandshake] = useState<HandshakeResponse | null>(null);
   const [busy, setBusy] = useState(false);
   const [conceptProgress, setConceptProgress] = useState<ConceptProgressEvent | null>(null);
+  const [modelEvents, setModelEvents] = useState<ModelJobEvent[]>([]);
   const [toast, setToast] = useState<{ tone: ToastTone; message: string } | null>(null);
   const [alert, setAlert] = useState<string | null>(null);
   const [previewMode, setPreviewMode] = useState<PreviewMode>("applied");
@@ -147,6 +123,7 @@ export function ToyBoxApp() {
 
   useEffect(() => {
     if ((route.name !== "download" && route.name !== "failed") || !route.runId) return;
+    if (run?.runId === route.runId && (run.status === "Ready" || run.status === "Failed")) return;
     let cancelled = false;
     setBusy(true);
     setAlert(null);
@@ -178,7 +155,7 @@ export function ToyBoxApp() {
     return () => {
       cancelled = true;
     };
-  }, [route.name, route.runId]);
+  }, [route.name, route.runId, run]);
 
   function showToast(message: string, tone: ToastTone = "info") {
     setToast({ message, tone });
@@ -284,10 +261,13 @@ export function ToyBoxApp() {
 
     setBusy(true);
     setAlert(null);
+    setModelEvents([]);
     navigate("generating");
 
     try {
-      const response = await generateModel(runId, selectedConceptId);
+      const response = await generateModel(runId, selectedConceptId, (event) => {
+        setModelEvents((events) => [...events, event]);
+      });
       restoreRun(response.run);
       saveHistory({
         input: response.run.input,
@@ -382,7 +362,7 @@ export function ToyBoxApp() {
 
       {route.name === "generating" ? (
         <ProjectLayout routeName={route.name} onNew={resetWorkspace} onNavigate={handleNav}>
-          <ProgressPage busy={busy} ready={Boolean(readyRun)} onCancel={() => showToast("请求已提交，完成后会自动进入下载页。")} />
+          <ProgressPage events={modelEvents} busy={busy} ready={Boolean(readyRun)} onCancel={() => showToast("请求已提交，完成后会自动进入下载页。")} />
         </ProjectLayout>
       ) : route.name === "concept" ? (
         <ProjectLayout routeName={route.name} onNew={resetWorkspace} onNavigate={handleNav}>
@@ -810,42 +790,28 @@ function ConceptPage({
 
 const imageWaveDots = Array.from({ length: 84 }, (_, index) => index);
 
-function ProgressPage({ busy, ready, onCancel }: { busy: boolean; ready: boolean; onCancel: () => void }) {
-  const [startedAt, setStartedAt] = useState(() => Date.now());
-  const [now, setNow] = useState(() => Date.now());
+function ProgressPage({ events, busy, ready, onCancel }: { events: ModelJobEvent[]; busy: boolean; ready: boolean; onCancel: () => void }) {
   const displayBusy = busy && !ready;
-  const elapsedMs = displayBusy ? now - startedAt : 0;
-  const progressState = getModelBuildMockState(elapsedMs, displayBusy);
-  const progressValue = progressState.progress;
-  const activeLogIndex = Math.min(modelBuildLogs.length - 1, progressState.logIndex);
-  const recentLogs = modelBuildLogs.slice(Math.max(0, activeLogIndex - 5), activeLogIndex + 1);
-  const activeTokens = Array.from({ length: 54 }, (_, index) => modelBuildTokens[(progressState.tokenOffset + index * 7) % modelBuildTokens.length]);
+  const timeline = buildModelTimeline(events, displayBusy);
+  const completedEvents = events.filter((event) =>
+    event.type === "tool.completed" ||
+    event.type === "artifact.created" ||
+    event.type === "artifact.patch" ||
+    (event.type === "job.completed" && event.response?.run.status === "Ready")
+  ).length;
+  const failedSteps = timeline.filter((item) => item.state === "error").length;
+  const activeTokens = Array.from({ length: 54 }, (_, index) => modelBuildTokens[(events.length + index * 7) % modelBuildTokens.length]);
   const pipelineStages = [
-    { label: "图像提交", copy: "所选概念图已送入 Tripo image-to-model。", threshold: 18 },
-    { label: "网格推断", copy: "生成主体体块、闭合表面和可打印轮廓。", threshold: 42 },
-    { label: "STL 转换", copy: "输出可下载的 STL 文件并检查响应。", threshold: 68 },
-    { label: "局部渲染与细节取样", copy: "3D 渲染过程中同步输出局部视角。模型拆解图会和 STL 一起进入检查台。", threshold: 88 }
+    { label: "图像提交", copy: "锁定所选概念图和打印参数。", keys: ["select_concept", "job.started"] },
+    { label: "Tripo 建模", copy: "调用 Tripo image-to-model，等待外部任务返回模型资产。", keys: ["tripo_generate_model"] },
+    { label: "STL 校验", copy: "下载 STL 并执行基础可打印文件校验。", keys: ["validate_stl"] },
+    { label: "局部渲染与细节取样", copy: "3D 渲染过程中同步准备局部视角，模型拆解图会和 STL 一起进入检查台。", keys: ["artifact.created", "save_run"] }
   ];
-
-  useEffect(() => {
-    if (!displayBusy) {
-      return;
-    }
-
-    const start = Date.now();
-    setStartedAt(start);
-    setNow(start);
-    const timer = window.setInterval(() => {
-      setNow(Date.now());
-    }, 1000);
-
-    return () => window.clearInterval(timer);
-  }, [displayBusy]);
 
   return (
     <main className="progress-page">
       <section className="progress-stack">
-        <div className="progress-preview" aria-label="Image 2 生成波纹预览">
+        <div className="progress-preview workspace-breathing" aria-label="AI 工作区呼吸预览">
           <div className="image-wave-field" aria-hidden="true">
             {imageWaveDots.map((dot) => (
               <span key={dot} style={{ animationDelay: `${(dot % 12) * 0.08 + Math.floor(dot / 12) * 0.05}s` }} />
@@ -860,20 +826,25 @@ function ProgressPage({ busy, ready, onCancel }: { busy: boolean; ready: boolean
         </div>
         <div className="progress-copy">
           <h1>正在生成 STL 模型</h1>
-          <p>Tripo 正在把所选图像转换为可下载几何体，同时准备检查台需要的拆解视角和局部细节。</p>
+          <p>这里显示真实任务事件：外部工具调用、STL 校验、文件保存和产物创建。Tripo 运行中会保持连接，不展示无法验证的精确百分比。</p>
         </div>
-        <div className="segmented-progress">
+        <div className="segmented-progress event-summary" role="status" aria-live="polite">
           <div className="metric-row">
-            <span className="section-label">模型生成进度</span>
-            <strong className="mono">{progressValue}%</strong>
+            <span className="section-label">真实任务进度</span>
+            <strong className="mono">{completedEvents} 个事件完成</strong>
           </div>
-          <div className="progress-track">
-            <div className="progress-fill" style={{ width: `${progressValue}%` }} />
+          <div className={displayBusy ? "event-pulse-track active" : failedSteps ? "event-pulse-track error" : "event-pulse-track done"} aria-hidden="true">
+            <span />
+            <span />
+            <span />
+            <span />
+            <span />
           </div>
+          <p>{failedSteps ? "检测到失败事件，请查看日志详情。" : displayBusy ? "任务正在运行，等待下一个工具事件。" : "任务事件已收束。"}</p>
         </div>
         <section className="render-pipeline" aria-label="模型生成阶段">
           {pipelineStages.map((stage, index) => {
-            const state = progressValue >= stage.threshold ? "done" : progressValue >= (pipelineStages[index - 1]?.threshold ?? 0) ? "active" : "pending";
+            const state = getPipelineState(events, stage.keys, displayBusy, index);
             return (
               <article className={`pipeline-step ${state}`} key={stage.label}>
                 <span className="pipeline-index">{String(index + 1).padStart(2, "0")}</span>
@@ -891,7 +862,7 @@ function ProgressPage({ busy, ready, onCancel }: { busy: boolean; ready: boolean
               <Terminal size={18} />
               生成日志
             </div>
-            <span>{displayBusy ? "tail -f /tripo/model-build.log" : "complete"}</span>
+            <span>{displayBusy ? "event stream connected" : "complete"}</span>
           </div>
           <div className="token-stream" aria-label="活跃任务词元">
             {activeTokens.map((token, index) => (
@@ -900,11 +871,11 @@ function ProgressPage({ busy, ready, onCancel }: { busy: boolean; ready: boolean
               </span>
             ))}
           </div>
-          <div className="log-lines" role="log" aria-live="polite" aria-label="最近生成日志">
-            {recentLogs.map((log, index) => {
-              const latest = index === recentLogs.length - 1;
+          <div className="log-lines progress-events" role="log" aria-live="polite" aria-label="最近生成日志">
+            {timeline.map((log, index) => {
+              const latest = index === timeline.length - 1;
               return (
-                <div className={latest ? `log-line latest ${log.tone}` : `log-line ${log.tone}`} key={`${log.tag}-${log.message}`}>
+                <div className={latest ? `log-line progress-event latest ${log.state}` : `log-line progress-event ${log.state}`} key={log.id}>
                   <span>[{log.tag}]</span>
                   <span>{log.message}</span>
                   <em>{log.detail}</em>

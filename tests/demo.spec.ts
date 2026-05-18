@@ -96,7 +96,7 @@ test("STL 生成进度会包含局部渲染阶段", async ({ page }) => {
   await expect(pipeline.getByText("模型拆解图会和 STL 一起进入检查台。")).toBeVisible();
 });
 
-test("STL mock 进度按两分钟窗口单调推进且不循环", async ({ page }) => {
+test("STL 进度展示真实后端事件流并完成交付", async ({ page }) => {
   await page.route("**/api/handshake", async (route) => {
     await route.fulfill({
       contentType: "application/json",
@@ -122,41 +122,141 @@ test("STL mock 进度按两分钟窗口单调推进且不循环", async ({ page 
       body: conceptStreamBody("stl-progress-mock")
     });
   });
-  await page.route("**/api/models", async () => {
-    await new Promise(() => undefined);
+  await page.route("**/api/models", async (route) => {
+    const run = {
+      runId: "stl-progress-mock",
+      input: {
+        category: "aircraft",
+        subtype: "airliner",
+        style: "航展涂装",
+        primaryColor: "#245b70",
+        accentColor: "#f3ead7",
+        label: "07",
+        description: "用于真实事件流测试的客机模型。",
+        targetLengthMm: 120
+      },
+      concepts: [
+        {
+          id: "stl-progress-mock-a",
+          title: "推荐建模图",
+          imageUrl: `data:image/png;base64,${pixel}`,
+          prompt: "test"
+        }
+      ],
+      selectedConceptId: "stl-progress-mock-a",
+      status: "Ready",
+      reasons: [],
+      files: {
+        stl: "/runs/stl-progress-mock/model.stl"
+      },
+      createdAt: "2026-05-12T00:00:00.000Z",
+      updatedAt: "2026-05-12T00:00:00.000Z"
+    };
+    const events = [
+      { type: "job.started", jobId: run.runId, title: "生成 STL 模型", at: "2026-05-12T00:00:00.000Z" },
+      { type: "tool.started", jobId: run.runId, callId: "tripo_generate_model", name: "tripo_image_to_model", inputSummary: "推荐建模图", at: "2026-05-12T00:00:01.000Z" },
+      { type: "tool.completed", jobId: run.runId, callId: "tripo_generate_model", name: "tripo_image_to_model", outputSummary: "model.stl", at: "2026-05-12T00:00:02.000Z" },
+      { type: "tool.started", jobId: run.runId, callId: "validate_stl", name: "validate_stl", inputSummary: "model.stl", at: "2026-05-12T00:00:03.000Z" },
+      { type: "tool.completed", jobId: run.runId, callId: "validate_stl", name: "validate_stl", outputSummary: "STL 文件通过基础校验", at: "2026-05-12T00:00:04.000Z" },
+      { type: "artifact.created", jobId: run.runId, artifactId: `${run.runId}:stl`, kind: "stl", title: "可下载 STL 文件", data: { href: run.files.stl }, at: "2026-05-12T00:00:05.000Z" },
+      { type: "job.completed", jobId: run.runId, at: "2026-05-12T00:00:06.000Z", response: { run } }
+    ];
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await route.fulfill({
+      contentType: "application/x-ndjson",
+      body: events.map((event) => JSON.stringify(event)).join("\n") + "\n"
+    });
   });
 
-  await page.clock.install();
   await page.goto("/configure");
   await page.getByRole("button", { name: "生成 2 张概念图" }).click();
   await expect(page).toHaveURL(/\/concept$/);
   await page.getByRole("button", { name: "使用推荐图生成 STL" }).click();
   await expect(page).toHaveURL(/\/generate$/);
 
-  const progressText = page.locator(".segmented-progress .mono");
-  const readProgress = async () => Number((await progressText.textContent())?.replace("%", ""));
-
-  const start = await readProgress();
-  await page.clock.fastForward(25_000);
-  const beforeOldLoopPoint = await readProgress();
-  await page.clock.fastForward(3_000);
-  const afterOldLoopPoint = await readProgress();
-  await page.clock.fastForward(60_000);
-  const midpoint = await readProgress();
-  await page.clock.fastForward(55_000);
-  const nearDone = await readProgress();
-  await page.clock.fastForward(20_000);
-  const capped = await readProgress();
-
-  expect(start).toBeGreaterThanOrEqual(8);
-  expect(afterOldLoopPoint).toBeGreaterThanOrEqual(beforeOldLoopPoint);
-  expect(midpoint).toBeGreaterThan(start);
-  expect(nearDone).toBeGreaterThan(midpoint);
-  expect(capped).toBeGreaterThanOrEqual(nearDone);
-  expect(capped).toBeLessThanOrEqual(96);
+  await expect(page.getByText("真实任务进度")).toBeVisible();
+  await expect(page.getByText("等待后端工具事件")).toBeVisible();
+  await expect(page).toHaveURL(/\/download\/stl-progress-mock$/);
+  await expect(page.getByRole("heading", { name: "模型检查台" })).toBeVisible();
 });
 
-test("STL 已就绪后回看生成页不会重新跑假进度", async ({ page }) => {
+test("STL 失败事件流不会显示模型生成完成", async ({ page }) => {
+  await page.route("**/api/handshake", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        ok: true,
+        app: "printable-model-demo",
+        apiVersion: "0.1.0",
+        mode: { imageProvider: "openai", modelProvider: "tripo" },
+        configured: { openai: true, tripo: false },
+        capabilities: {
+          conceptImages: true,
+          modelGeneration: true,
+          stlDownload: true,
+          threeMfDownload: false,
+          statuses: ["Ready", "Failed"]
+        }
+      })
+    });
+  });
+  await page.route("**/api/concepts", async (route) => {
+    await route.fulfill({
+      contentType: "application/x-ndjson",
+      body: conceptStreamBody("stl-progress-failed")
+    });
+  });
+  await page.route("**/api/models", async (route) => {
+    const run = {
+      runId: "stl-progress-failed",
+      input: {
+        category: "aircraft",
+        subtype: "airliner",
+        style: "航展涂装",
+        primaryColor: "#245b70",
+        accentColor: "#f3ead7",
+        label: "07",
+        description: "用于真实失败事件流测试的客机模型。",
+        targetLengthMm: 120
+      },
+      concepts: [
+        {
+          id: "stl-progress-failed-a",
+          title: "推荐建模图",
+          imageUrl: `data:image/png;base64,${pixel}`,
+          prompt: "test"
+        }
+      ],
+      selectedConceptId: "stl-progress-failed-a",
+      status: "Failed",
+      reasons: ["生成可打印模型前，请先设置 TRIPO_API_KEY。"],
+      files: {},
+      createdAt: "2026-05-12T00:00:00.000Z",
+      updatedAt: "2026-05-12T00:00:00.000Z"
+    };
+    const events = [
+      { type: "job.started", jobId: run.runId, title: "生成 STL 模型", at: "2026-05-12T00:00:00.000Z" },
+      { type: "step.started", jobId: run.runId, stepId: "select_concept", title: "锁定概念图和打印参数", at: "2026-05-12T00:00:01.000Z" },
+      { type: "step.failed", jobId: run.runId, stepId: "model_generation", error: "生成可打印模型前，请先设置 TRIPO_API_KEY。", recoverable: true, at: "2026-05-12T00:00:02.000Z" },
+      { type: "job.completed", jobId: run.runId, at: "2026-05-12T00:00:03.000Z", response: { run } }
+    ];
+    await route.fulfill({
+      contentType: "application/x-ndjson",
+      body: events.map((event) => JSON.stringify(event)).join("\n") + "\n"
+    });
+  });
+
+  await page.goto("/configure");
+  await page.getByRole("button", { name: "生成 2 张概念图" }).click();
+  await page.getByRole("button", { name: "使用推荐图生成 STL" }).click();
+
+  await expect(page).toHaveURL(/\/failed\/stl-progress-failed$/);
+  await expect(page.getByRole("heading", { name: "这次没有生成成功" })).toBeVisible();
+  await expect(page.getByText("生成可打印模型前，请先设置 TRIPO_API_KEY。")).toBeVisible();
+  await expect(page.getByText("模型生成完成")).toHaveCount(0);
+});
+
+test("STL 已就绪后回看生成页不会重新提交生成任务", async ({ page }) => {
   const runId = "ready-run-no-fake-progress";
   await writeReadyRun(runId);
   let modelRequests = 0;

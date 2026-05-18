@@ -26,6 +26,7 @@ try {
   await waitForHttp(`http://127.0.0.1:${apiPort}/api/health`);
 
   const web = spawnManaged(npmCommand, ["run", "dev:toybox", "--", "--host", "127.0.0.1", "--port", String(webPort), "--strictPort"], {
+    API_BASE_URL: `http://127.0.0.1:${apiPort}`,
     VITE_APP: "toybox"
   });
   await waitForHttp(`http://127.0.0.1:${webPort}/configure`);

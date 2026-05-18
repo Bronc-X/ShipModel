@@ -65,13 +65,23 @@ export interface ModelRun {
   updatedAt: string;
 }
 
+export interface GenerateModelResponse {
+  run: ModelRun;
+}
+
+export type ModelJobEvent =
+  | { type: "job.started"; jobId: string; title: string; at: string }
+  | { type: "step.started"; jobId: string; stepId: string; title: string; at: string }
+  | { type: "tool.started"; jobId: string; callId: string; name: string; inputSummary?: string; at: string }
+  | { type: "tool.completed"; jobId: string; callId: string; name: string; outputSummary?: string; at: string }
+  | { type: "artifact.created"; jobId: string; artifactId: string; kind: string; title?: string; data: unknown; at: string }
+  | { type: "artifact.patch"; jobId: string; artifactId: string; patch: unknown; at: string }
+  | { type: "step.failed"; jobId: string; stepId: string; error: string; recoverable: boolean; at: string }
+  | { type: "job.completed"; jobId: string; at: string; response?: GenerateModelResponse };
+
 export interface GenerateModelRequest {
   runId: string;
   conceptId: string;
-}
-
-export interface GenerateModelResponse {
-  run: ModelRun;
 }
 
 export interface HandshakeResponse {

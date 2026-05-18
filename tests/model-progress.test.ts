@@ -1,25 +1,71 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { getModelBuildMockState } from "../src/toybox/modelBuildProgress.ts";
+import { buildModelTimeline, getPipelineState } from "../src/toybox/modelJobProgress.ts";
+import type { ModelJobEvent } from "../src/types.ts";
 
-describe("model build mock progress", () => {
-  it("moves monotonically through a 90-120 second window without looping", () => {
-    const samples = [0, 15_000, 30_000, 60_000, 90_000, 105_000, 120_000, 150_000].map((elapsedMs) =>
-      getModelBuildMockState(elapsedMs, true).progress
-    );
+const jobId = "event-progress-run";
 
-    assert.equal(samples[0], 8);
-    assert.ok(samples[4] - samples[3] > samples[2] - samples[0], "later progress should move faster than early progress");
-    for (let index = 1; index < samples.length; index += 1) {
-      assert.ok(samples[index] >= samples[index - 1], `progress moved backward at sample ${index}`);
-    }
-    assert.equal(samples.at(-1), 96);
+describe("model build event progress", () => {
+  it("builds progress from real job and tool events", () => {
+    const events: ModelJobEvent[] = [
+      { type: "job.started", jobId, title: "生成 STL 模型", at: "2026-05-18T00:00:00.000Z" },
+      { type: "tool.started", jobId, callId: "tripo_generate_model", name: "tripo_image_to_model", inputSummary: "推荐建模图", at: "2026-05-18T00:00:01.000Z" },
+      { type: "tool.completed", jobId, callId: "tripo_generate_model", name: "tripo_image_to_model", outputSummary: "model.stl", at: "2026-05-18T00:00:02.000Z" },
+      { type: "artifact.created", jobId, artifactId: `${jobId}:stl`, kind: "stl", title: "可下载 STL 文件", data: { href: "/runs/event-progress-run/model.stl" }, at: "2026-05-18T00:00:03.000Z" }
+    ];
+
+    const timeline = buildModelTimeline(events, true);
+
+    assert.ok(timeline.some((item) => item.tag === "TRIPO-IMAGE-TO-MODEL" && item.state === "active"));
+    assert.ok(timeline.some((item) => item.tag === "TRIPO-IMAGE-TO-MODEL" && item.state === "done"));
+    assert.ok(timeline.some((item) => item.tag === "ARTIFACT" && item.message === "可下载 STL 文件"));
   });
 
-  it("returns a completed state when model generation is no longer busy", () => {
-    const complete = getModelBuildMockState(12_000, false);
+  it("marks pipeline stages from matching event keys", () => {
+    const events: ModelJobEvent[] = [
+      { type: "tool.started", jobId, callId: "validate_stl", name: "validate_stl", inputSummary: "model.stl", at: "2026-05-18T00:00:01.000Z" },
+      { type: "tool.completed", jobId, callId: "validate_stl", name: "validate_stl", outputSummary: "STL 文件通过基础校验", at: "2026-05-18T00:00:02.000Z" }
+    ];
 
-    assert.equal(complete.progress, 100);
-    assert.equal(complete.logIndex, 14);
+    assert.equal(getPipelineState(events, ["validate_stl"], true, 2), "done");
+    assert.equal(getPipelineState([], ["tripo_generate_model"], true, 0), "active");
+    assert.equal(getPipelineState([], ["tripo_generate_model"], true, 1), "pending");
+  });
+
+  it("does not label failed completed jobs as successful generation", () => {
+    const events: ModelJobEvent[] = [
+      { type: "step.failed", jobId, stepId: "model_generation", error: "TRIPO_API_KEY is missing", recoverable: true, at: "2026-05-18T00:00:01.000Z" },
+      {
+        type: "job.completed",
+        jobId,
+        at: "2026-05-18T00:00:02.000Z",
+        response: {
+          run: {
+            runId: jobId,
+            input: {
+              category: "aircraft",
+              subtype: "airliner",
+              style: "航展涂装",
+              primaryColor: "#245b70",
+              accentColor: "#f3ead7",
+              label: "07",
+              description: "失败流测试。",
+              targetLengthMm: 120
+            },
+            concepts: [],
+            status: "Failed",
+            reasons: ["TRIPO_API_KEY is missing"],
+            files: {},
+            createdAt: "2026-05-18T00:00:00.000Z",
+            updatedAt: "2026-05-18T00:00:02.000Z"
+          }
+        }
+      }
+    ];
+
+    const timeline = buildModelTimeline(events, false);
+
+    assert.ok(timeline.some((item) => item.message === "模型生成失败" && item.state === "error"));
+    assert.equal(timeline.some((item) => item.message === "模型生成完成"), false);
   });
 });

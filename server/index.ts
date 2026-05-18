@@ -4,7 +4,7 @@ import express from "express";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { ensureRunDir, getRunDir, loadRun, publicRunFile, runsDir, saveRun } from "./storage.js";
-import type { ConceptProgressEvent, ConceptResponse, GenerateModelRequest, HandshakeResponse, ModelRequest, ModelRun } from "./types.js";
+import type { ConceptProgressEvent, ConceptResponse, GenerateModelRequest, GenerateModelResponse, HandshakeResponse, ModelJobEvent, ModelRequest, ModelRun } from "./types.js";
 import { openAiConcepts } from "./providers/openaiImages.js";
 import { generateTripoModel } from "./providers/tripoModel.js";
 import { validateStl } from "./validate.js";
@@ -165,45 +165,14 @@ async function streamConceptProgress(input: ModelRequest, response: express.Resp
 }
 
 app.post("/api/models", async (request, response) => {
+  if (String(request.headers.accept ?? "").includes("application/x-ndjson")) {
+    await streamModelProgress(request.body as GenerateModelRequest, response);
+    return;
+  }
+
   try {
-    const body = request.body as GenerateModelRequest;
-    const run = await loadRun(body.runId);
-    const concept = run.concepts.find((item) => item.id === body.conceptId);
-    if (!concept) {
-      response.status(404).json({ error: "Concept not found" });
-      return;
-    }
-
-    run.selectedConceptId = body.conceptId;
-    run.reasons = [];
-
-    try {
-      if (!process.env.TRIPO_API_KEY) {
-        throw new Error("生成可打印模型前，请先设置 TRIPO_API_KEY。");
-      }
-
-      const stlFile = await generateTripoModel(run);
-      const reasons = await validateStl(run.runId, stlFile);
-
-      if (reasons.length > 0) {
-        run.status = "Failed";
-        run.reasons = reasons;
-        run.files = {};
-      } else {
-        run.status = "Ready";
-        run.reasons = [];
-        run.files = {
-          stl: publicRunFile(run.runId, stlFile)
-        };
-      }
-    } catch (error) {
-      run.status = "Failed";
-      run.reasons = [error instanceof Error ? error.message : "model_generation_failed"];
-      run.files = {};
-    }
-
-    await saveRun(run);
-    response.json({ run });
+    const payload = await runModelGeneration(request.body as GenerateModelRequest);
+    response.json(payload);
   } catch (error) {
     response.status(500).json({
       error: "Model generation failed",
@@ -211,6 +180,101 @@ app.post("/api/models", async (request, response) => {
     });
   }
 });
+
+async function streamModelProgress(body: GenerateModelRequest, response: express.Response) {
+  response.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+  response.setHeader("Cache-Control", "no-cache, no-transform");
+  response.setHeader("X-Accel-Buffering", "no");
+
+  const jobId = body.runId;
+  const send = (event: ModelJobEvent) => {
+    response.write(`${JSON.stringify(event)}\n`);
+  };
+  const emit = async (event: ModelJobEvent) => {
+    send(event);
+  };
+
+  try {
+    const payload = await runModelGeneration(body, emit);
+    send({ type: "job.completed", jobId, at: new Date().toISOString(), response: payload });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Model generation failed";
+    send({ type: "step.failed", jobId, stepId: "model_generation", error: message, recoverable: true, at: new Date().toISOString() });
+    send({ type: "job.completed", jobId, at: new Date().toISOString() });
+  } finally {
+    response.end();
+  }
+}
+
+async function runModelGeneration(body: GenerateModelRequest, emit?: (event: ModelJobEvent) => Promise<void>): Promise<GenerateModelResponse> {
+  const run = await loadRun(body.runId);
+  const jobId = run.runId;
+  const at = () => new Date().toISOString();
+  const send = async (event: ModelJobEvent) => {
+    await emit?.(event);
+  };
+
+  await send({ type: "job.started", jobId, title: "生成 STL 模型", at: at() });
+
+  const concept = run.concepts.find((item) => item.id === body.conceptId);
+  if (!concept) {
+    throw new Error("Concept not found");
+  }
+
+  await send({ type: "step.started", jobId, stepId: "select_concept", title: "锁定概念图和打印参数", at: at() });
+  run.selectedConceptId = body.conceptId;
+  run.reasons = [];
+  await send({ type: "tool.completed", jobId, callId: "select_concept", name: "select_concept", outputSummary: `${run.input.category} / ${run.input.targetLengthMm}mm`, at: at() });
+
+  try {
+    if (!process.env.TRIPO_API_KEY) {
+      throw new Error("生成可打印模型前，请先设置 TRIPO_API_KEY。");
+    }
+
+    await send({ type: "tool.started", jobId, callId: "tripo_generate_model", name: "tripo_image_to_model", inputSummary: concept.title, at: at() });
+    const stlFile = await generateTripoModel(run, async (event) => {
+      await send({ ...event, jobId, at: at() });
+    });
+    await send({ type: "tool.completed", jobId, callId: "tripo_generate_model", name: "tripo_image_to_model", outputSummary: stlFile, at: at() });
+
+    await send({ type: "tool.started", jobId, callId: "validate_stl", name: "validate_stl", inputSummary: stlFile, at: at() });
+    const reasons = await validateStl(run.runId, stlFile);
+
+    if (reasons.length > 0) {
+      run.status = "Failed";
+      run.reasons = reasons;
+      run.files = {};
+      await send({ type: "step.failed", jobId, stepId: "validate_stl", error: reasons.join("；"), recoverable: true, at: at() });
+    } else {
+      run.status = "Ready";
+      run.reasons = [];
+      run.files = {
+        stl: publicRunFile(run.runId, stlFile)
+      };
+      await send({ type: "tool.completed", jobId, callId: "validate_stl", name: "validate_stl", outputSummary: "STL 文件通过基础校验", at: at() });
+      await send({
+        type: "artifact.created",
+        jobId,
+        artifactId: `${run.runId}:stl`,
+        kind: "stl",
+        title: "可下载 STL 文件",
+        data: { href: run.files.stl },
+        at: at()
+      });
+    }
+  } catch (error) {
+    run.status = "Failed";
+    run.reasons = [error instanceof Error ? error.message : "model_generation_failed"];
+    run.files = {};
+    await send({ type: "step.failed", jobId, stepId: "model_generation", error: run.reasons[0], recoverable: true, at: at() });
+  }
+
+  await send({ type: "tool.started", jobId, callId: "save_run", name: "save_run", inputSummary: run.status ?? "unknown", at: at() });
+  await saveRun(run);
+  await send({ type: "tool.completed", jobId, callId: "save_run", name: "save_run", outputSummary: `状态：${run.status ?? "unknown"}`, at: at() });
+
+  return { run };
+}
 
 app.get("/api/runs/:runId", async (request, response) => {
   try {

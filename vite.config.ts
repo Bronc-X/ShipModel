@@ -6,6 +6,7 @@ import { defineConfig } from "vite";
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
 const app = process.env.VITE_APP ?? "toybox";
 const htmlEntry = app === "lusie" ? "lusie.html" : "index.html";
+const apiProxyTarget = process.env.API_BASE_URL ?? "http://localhost:5174";
 
 export default defineConfig(() => ({
   plugins: [
@@ -34,8 +35,8 @@ export default defineConfig(() => ({
   server: {
     port: app === "lusie" ? 5175 : 5173,
     proxy: {
-      "/api": "http://localhost:5174",
-      "/runs": "http://localhost:5174"
+      "/api": apiProxyTarget,
+      "/runs": apiProxyTarget
     }
   },
   build: {
