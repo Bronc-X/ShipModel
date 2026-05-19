@@ -91,7 +91,7 @@ export function buildImagePrompt(input: ModelRequest, variant: "A" | "B") {
     `Target bounding box for the later 3D model: ${input.targetLengthMm} x ${widthMm} x ${heightMm} mm (X length x Y width x Z height). Keep these proportions visible in the silhouette.`,
     `Selected product style: ${input.style}, treated as finish and presentation only; keep the physical form realistic.`,
     `Selected colorway: primary ${primaryColor}; accent ${accentColor}. Apply the primary color to the main body and the accent color only to secondary panels or small details.`,
-    input.label ? `Include the exact number "${input.label}" only as a small raised simple marking.` : "",
+    input.markingText?.trim() ? `Include the exact marking text "${input.markingText.trim()}" only as a small raised simple marking on the model surface.` : "",
     `Composition: ${composition}, centered on a plain warm off-white background.`,
     `Subtype printability baseline: ${profile.printability}.`,
     "Printable geometry guardrail: make it a single connected printable static display model with clean hard-surface forms, large readable masses, thick solid wheels, chunky connected supports, and no thin floating suspension rods.",

@@ -10,6 +10,7 @@ const input: ModelRequest = {
   primaryColor: "#f3ead7",
   accentColor: "#2e3538",
   label: "A01",
+  markingText: "TONI A01",
   description: "生成一个可打印的现代战机模型。",
   targetLengthMm: 180
 };
@@ -17,7 +18,7 @@ const input: ModelRequest = {
 const concepts: Concept[] = [
   {
     id: "concept-a",
-    title: "推荐建模图",
+    title: "建模图",
     imageUrl: "data:image/png;base64,iVBORw0KGgo=",
     prompt: "prompt-a",
     feedback: "主体完整。"
@@ -54,12 +55,21 @@ describe("toybox local history", () => {
     const store = new MemoryStore();
 
     appendHistoryEntry(store, { input, runId: "run-1", concepts, status: "concept" }, "2026-05-12T08:00:00.000Z");
-    appendHistoryEntry(store, { input: { ...input, label: "A02" }, runId: "run-2", concepts, status: "concept" }, "2026-05-12T08:01:00.000Z");
+    appendHistoryEntry(store, { input: { ...input, label: "A02", markingText: "TONI A02" }, runId: "run-2", concepts, status: "concept" }, "2026-05-12T08:01:00.000Z");
 
     const entries = getHistoryEntries(store);
     assert.equal(entries.length, 2);
     assert.deepEqual(entries.map((entry) => entry.runId), ["run-2", "run-1"]);
-    assert.equal(entries[0].label, "A02");
+    assert.equal(entries[0].label, "TONI A02");
+  });
+
+  it("falls back to an unmarked label when no model marking is provided", () => {
+    const store = new MemoryStore();
+
+    appendHistoryEntry(store, { input: { ...input, markingText: "" }, runId: "run-unmarked", concepts, status: "concept" }, "2026-05-12T08:00:00.000Z");
+
+    const entries = getHistoryEntries(store);
+    assert.equal(entries[0].label, "未加标志");
   });
 
   it("updates an existing run when the STL status changes", () => {

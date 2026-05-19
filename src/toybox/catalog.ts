@@ -80,9 +80,10 @@ export function defaultInputForSubtype(category: ModelCategory, subtype: ModelSu
     category,
     subtype,
     style: firstStyle(category),
-    primaryColor: "#c7352f",
-    accentColor: "#f3ead7",
-    label: "07",
+    primaryColor: "#2e3538",
+    accentColor: "#2e3538",
+    label: "",
+    markingText: "",
     description: defaultPrompts[subtype],
     targetLengthMm: 120
   };

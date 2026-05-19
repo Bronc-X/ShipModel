@@ -31,6 +31,22 @@ export async function generateConcepts(input: ModelRequest, onProgress?: (event:
   return (await response.json()) as { runId: string; concepts: Concept[] };
 }
 
+export async function reviseConcept(runId: string, conceptId: string, instruction: string) {
+  const response = await fetch("/api/concepts/revise", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ runId, conceptId, instruction })
+  });
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response));
+  }
+
+  return (await response.json()) as { run: ModelRun; concept: Concept };
+}
+
 async function readConceptProgress(response: Response, onProgress: (event: ConceptProgressEvent) => void) {
   if (!response.ok || !response.body) {
     throw new Error(await getErrorMessage(response));

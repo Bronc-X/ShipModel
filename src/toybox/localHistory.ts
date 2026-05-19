@@ -75,7 +75,7 @@ export function appendHistoryEntry(
     createdAt: previous?.createdAt ?? now,
     updatedAt: now,
     title: buildHistoryTitle(entryInput.input),
-    label: entryInput.input.label.trim() || "未编号",
+    label: buildHistoryLabel(entryInput.input),
     previewImageUrl: toStoredPreview(entryInput.concepts?.[0]?.imageUrl ?? previous?.previewImageUrl ?? null)
   };
 
@@ -129,6 +129,10 @@ export function setMembership(store: LocalHistoryStore = window.localStorage, pl
 
 function buildHistoryTitle(input: ModelRequest) {
   return `${input.style} ${input.subtype}`;
+}
+
+function buildHistoryLabel(input: ModelRequest) {
+  return input.markingText?.trim() || "未加标志";
 }
 
 function sanitizeConcepts(concepts: Concept[]) {

@@ -27,7 +27,7 @@ import {
   Wand2
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { generateConcepts, generateModel, getHandshake, getRun } from "../api";
+import { generateConcepts, generateModel, getHandshake, getRun, reviseConcept } from "../api";
 import { ModelViewer } from "../components/ModelViewer";
 import type { Concept, ConceptProgressEvent, HandshakeResponse, ModelCategory, ModelJobEvent, ModelRequest, ModelRun, ModelSubtype } from "../types";
 import { categories, colors, defaultInput, defaultInputForSubtype, defaultPrompts, firstStyle, firstSubtype, stylesByCategory } from "./catalog";
@@ -90,6 +90,8 @@ export function ToyBoxApp() {
   const [busy, setBusy] = useState(false);
   const [conceptProgress, setConceptProgress] = useState<ConceptProgressEvent | null>(null);
   const [modelEvents, setModelEvents] = useState<ModelJobEvent[]>([]);
+  const [conceptRevisionText, setConceptRevisionText] = useState("");
+  const [revisionBusy, setRevisionBusy] = useState(false);
   const [toast, setToast] = useState<{ tone: ToastTone; message: string } | null>(null);
   const [alert, setAlert] = useState<string | null>(null);
   const [previewMode, setPreviewMode] = useState<PreviewMode>("applied");
@@ -194,6 +196,7 @@ export function ToyBoxApp() {
     setSelectedConceptId(null);
     setRun(null);
     setConceptProgress(null);
+    setConceptRevisionText("");
     setAlert(null);
     navigate("configure");
     showToast("已清空画布，可以开始下一版。");
@@ -234,6 +237,7 @@ export function ToyBoxApp() {
       setRunId(response.runId);
       setConcepts(response.concepts);
       setSelectedConceptId(response.concepts[0]?.id ?? null);
+      setConceptRevisionText("");
       setRun(null);
       saveHistory({
         input,
@@ -282,6 +286,39 @@ export function ToyBoxApp() {
       navigate("failed", true, runId);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handleReviseConcept() {
+    if (!runId || !selectedConceptId) {
+      showAlert("请先生成概念图，再提交修改。");
+      return;
+    }
+    const instruction = conceptRevisionText.trim();
+    if (!instruction) {
+      showAlert("请先写下想修改的地方。");
+      return;
+    }
+
+    setRevisionBusy(true);
+    setAlert(null);
+    try {
+      const response = await reviseConcept(runId, selectedConceptId, instruction);
+      restoreRun(response.run);
+      setSelectedConceptId(response.concept.id);
+      setConceptRevisionText("");
+      saveHistory({
+        input: response.run.input,
+        runId: response.run.runId,
+        concepts: response.run.concepts,
+        selectedConceptId: response.concept.id,
+        status: "concept"
+      });
+      showToast("概念图已按你的描述更新。");
+    } catch (error) {
+      showAlert(error instanceof Error ? error.message : "概念图修改失败。");
+    } finally {
+      setRevisionBusy(false);
     }
   }
 
@@ -371,8 +408,12 @@ export function ToyBoxApp() {
             selectedConceptId={selectedConceptId}
             progress={conceptProgress}
             busy={busy}
+            revisionBusy={revisionBusy}
+            revisionText={conceptRevisionText}
             onSelect={setSelectedConceptId}
             onCreate={handleCreateModel}
+            onRevisionText={setConceptRevisionText}
+            onRevise={handleReviseConcept}
             onBack={() => navigate("configure")}
           />
         </ProjectLayout>
@@ -624,14 +665,14 @@ function ConfigPanel({
         </div>
 
         <div className="form-section">
-          <span className="section-label">风格 / 编号</span>
+          <span className="section-label">风格 / 模型标志</span>
           <div className="field-row">
             <select className="select-input" aria-label="样式" value={input.style} onChange={(event) => onInput((current) => ({ ...current, style: event.target.value }))}>
               {stylesByCategory[input.category].map((style) => (
                 <option key={style}>{style}</option>
               ))}
             </select>
-            <input className="text-input" aria-label="编号" maxLength={8} value={input.label} onChange={(event) => onInput((current) => ({ ...current, label: event.target.value }))} />
+            <input className="text-input" aria-label="模型标志文字" maxLength={24} placeholder="可选，例如 TONI ASIA" value={input.markingText ?? ""} onChange={(event) => onInput((current) => ({ ...current, markingText: event.target.value }))} />
           </div>
         </div>
 
@@ -651,7 +692,7 @@ function ConfigPanel({
         </div>
         <button className="button primary full-width" type="button" onClick={onGenerate}>
           <Wand2 size={18} />
-          {busy ? "正在生成概念图..." : "生成 2 张概念图"}
+          {busy ? "正在生成概念图..." : "生成概念图"}
         </button>
         {progress ? <ConceptProgressMeter progress={progress} /> : null}
       </div>
@@ -732,55 +773,79 @@ function ConceptPage({
   selectedConceptId,
   progress,
   busy,
+  revisionBusy,
+  revisionText,
   onSelect,
   onCreate,
+  onRevisionText,
+  onRevise,
   onBack
 }: {
   concepts: Concept[];
   selectedConceptId: string | null;
   progress: ConceptProgressEvent | null;
   busy: boolean;
+  revisionBusy: boolean;
+  revisionText: string;
   onSelect: (id: string) => void;
   onCreate: () => void;
+  onRevisionText: (value: string) => void;
+  onRevise: () => void;
   onBack: () => void;
 }) {
   const selectedConcept = concepts.find((concept) => concept.id === selectedConceptId) ?? concepts[0];
-  const selectedIsRecommended = Boolean(selectedConcept && concepts[0]?.id === selectedConcept.id);
 
   return (
     <main className="concept-page">
       <div className="page-frame">
         <header className="page-title">
           <h1>确认建模输入图</h1>
-          <p>系统默认选中更适合建模的一张图，另一张保留作备选参考。</p>
+          <p>系统默认选中这张建模图。你也可以继续用一句话调整外形、颜色或局部结构。</p>
         </header>
         {progress ? <ConceptProgressMeter progress={progress} /> : null}
         <section className="concept-grid" aria-label="概念图方案">
           {concepts.map((concept, index) => {
             const selected = selectedConceptId === concept.id;
-            const recommended = index === 0;
             return (
               <button className={selected ? "concept-card selected" : "concept-card"} key={concept.id} type="button" onClick={() => onSelect(concept.id)} aria-pressed={selected}>
-                <span className={recommended ? "concept-card-kicker recommended" : "concept-card-kicker"}>{recommended ? "推荐用于建模" : "备选参考图"}</span>
+                <span className={index === 0 ? "concept-card-kicker recommended" : "concept-card-kicker"}>{index === 0 ? "当前建模图" : "历史修改版"}</span>
                 <img alt={concept.title} src={concept.imageUrl} />
                 <div className="concept-card-body">
                   <h2>{concept.title}</h2>
-                  <p>{concept.feedback ?? "已生成候选图。请以外形比例、细节清晰度和可打印结构为准选择。"}</p>
+                  <p>{concept.feedback ?? "已生成建模图。请以外形比例、细节清晰度和可打印结构为准。"}</p>
                   <div className="concept-actions">
-                    <span className="concept-select-label">{selected ? "当前使用" : "改用这张"}</span>
+                    <span className="concept-select-label">{selected ? "当前使用" : "改用这一版"}</span>
                   </div>
                 </div>
               </button>
             );
           })}
         </section>
+        <section className="concept-revision" aria-label="继续修改概念图">
+          <div>
+            <span className="section-label">继续修改概念图</span>
+            <p>可以写“机颈再往上调 8 到 10 度”“把船锚展示出来”“调成绿色和白色”等。</p>
+          </div>
+          <textarea
+            className="text-area"
+            aria-label="继续修改概念图"
+            maxLength={260}
+            placeholder="写下想改的外形、颜色或局部细节。"
+            value={revisionText}
+            onChange={(event) => onRevisionText(event.target.value)}
+          />
+          <button className="button secondary" type="button" disabled={busy || revisionBusy || !selectedConcept} onClick={onRevise}>
+            <Wand2 size={18} />
+            {revisionBusy ? "正在修改..." : "提交修改"}
+          </button>
+        </section>
         <div className="action-row">
           <button className="button secondary" type="button" onClick={onBack}>
             返回修改参数
           </button>
-          <button className="button primary" type="button" onClick={onCreate}>
+          <button className="button primary" type="button" disabled={revisionBusy} onClick={onCreate}>
             <Sparkles size={18} />
-            {busy ? "正在提交给 Tripo..." : selectedIsRecommended ? "使用推荐图生成 STL" : "使用备选图生成 STL"}
+            {busy ? "正在提交给 Tripo..." : "使用这张图生成 STL"}
           </button>
         </div>
       </div>
@@ -929,7 +994,7 @@ function DownloadPage({ run, stlHref, onNew, onBack }: { run: ModelRun | null; s
           </div>
           <div className="inspection-section fidelity-note">
             <h2>概念图仅作建模参考</h2>
-            <p>最终 STL 只保留可打印网格，不包含概念图里的贴图、车窗材质、轮胎黑色、编号贴花或真实 PBR 材质。高保真外观预览需要改用 GLB/PBR 模型通道。</p>
+            <p>最终 STL 只保留可打印网格，不包含概念图里的贴图、车窗材质、轮胎黑色、标志文字色彩或真实 PBR 材质。想在 3D 打印时接近效果图，可以后期喷涂、贴水贴纸，或改走 GLB/PBR 与多材料打印通道。</p>
           </div>
           <div className="spec-grid">
             <Spec icon={<Ruler size={18} />} label="尺寸 (X, Y, Z)" value={`${dimensions.length} x ${dimensions.width} x ${dimensions.height} mm`} />

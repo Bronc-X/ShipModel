@@ -42,14 +42,21 @@ export type TripoModelProgressEvent =
 type TripoModelProgress = (event: TripoModelProgressEvent) => Promise<void> | void;
 
 const defaultBaseUrl = "https://api.tripo3d.ai/v2/openapi";
-const pollIntervalMs = 5000;
-const pollTimeoutMs = 1000 * 60 * 10;
 const tripoProxyUrl = process.env.TRIPO_PROXY_URL || process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
 const tripoDispatcher = tripoProxyUrl ? new ProxyAgent(tripoProxyUrl) : undefined;
+
+export function getTripoOptions(env: NodeJS.ProcessEnv = process.env) {
+  return {
+    pollIntervalMs: parsePositiveInt(env.TRIPO_POLL_INTERVAL_MS, 3000),
+    pollTimeoutMs: parsePositiveInt(env.TRIPO_POLL_TIMEOUT_MS, 1000 * 60 * 10),
+    downloadIntermediateGlb: env.TRIPO_DOWNLOAD_INTERMEDIATE_GLB === "true"
+  };
+}
 
 export async function generateTripoModel(run: ModelRun, emit?: TripoModelProgress) {
   const apiKey = process.env.TRIPO_API_KEY;
   const concept = run.concepts.find((item) => item.id === run.selectedConceptId);
+  const options = getTripoOptions();
   if (!apiKey) {
     throw new Error("TRIPO_API_KEY is missing");
   }
@@ -85,20 +92,24 @@ export async function generateTripoModel(run: ModelRun, emit?: TripoModelProgres
   }
   await emitProgress(emit, { type: "tool.completed", callId: "tripo_create_model_task", name: "tripo_create_model_task", outputSummary: `建模任务 ${taskId}` });
 
-  const completed = await pollTripoTask(baseUrl, apiKey, taskId, "tripo_poll_model_task", "tripo_poll_model_task", emit);
+  const completed = await pollTripoTask(baseUrl, apiKey, taskId, "tripo_poll_model_task", "tripo_poll_model_task", options, emit);
   const modelUrl = completed.output?.model ?? completed.output?.base_model ?? completed.output?.pbr_model;
   if (!modelUrl) {
     throw new Error("Tripo task succeeded but returned no model URL");
   }
 
-  await emitProgress(emit, { type: "tool.started", callId: "tripo_download_model_asset", name: "tripo_download_model_asset", inputSummary: "GLB source asset" });
-  await downloadModel(modelUrl, run.runId, "model.glb");
-  await emitProgress(emit, { type: "tool.completed", callId: "tripo_download_model_asset", name: "tripo_download_model_asset", outputSummary: "model.glb" });
+  if (options.downloadIntermediateGlb) {
+    await emitProgress(emit, { type: "tool.started", callId: "tripo_download_model_asset", name: "tripo_download_model_asset", inputSummary: "GLB source asset" });
+    await downloadModel(modelUrl, run.runId, "model.glb");
+    await emitProgress(emit, { type: "tool.completed", callId: "tripo_download_model_asset", name: "tripo_download_model_asset", outputSummary: "model.glb" });
+  } else {
+    await emitProgress(emit, { type: "tool.completed", callId: "tripo_skip_glb_download", name: "tripo_skip_glb_download", outputSummary: "跳过中间 GLB 下载，直接提交 STL 转换。" });
+  }
 
-  return convertTripoModel(baseUrl, apiKey, taskId, run.runId, emit);
+  return convertTripoModel(baseUrl, apiKey, taskId, run.runId, options, emit);
 }
 
-async function convertTripoModel(baseUrl: string, apiKey: string, originalTaskId: string, runId: string, emit?: TripoModelProgress) {
+async function convertTripoModel(baseUrl: string, apiKey: string, originalTaskId: string, runId: string, options: ReturnType<typeof getTripoOptions>, emit?: TripoModelProgress) {
   await emitProgress(emit, { type: "tool.started", callId: "tripo_create_stl_task", name: "tripo_create_stl_task", inputSummary: originalTaskId });
   const createResponse = await tripoFetch<TripoTaskResponse>(baseUrl, apiKey, ["task"], {
     method: "POST",
@@ -116,7 +127,7 @@ async function convertTripoModel(baseUrl: string, apiKey: string, originalTaskId
   }
   await emitProgress(emit, { type: "tool.completed", callId: "tripo_create_stl_task", name: "tripo_create_stl_task", outputSummary: `STL 转换任务 ${taskId}` });
 
-  const completed = await pollTripoTask(baseUrl, apiKey, taskId, "tripo_poll_stl_task", "tripo_poll_stl_task", emit);
+  const completed = await pollTripoTask(baseUrl, apiKey, taskId, "tripo_poll_stl_task", "tripo_poll_stl_task", options, emit);
   const stlUrl = completed.output?.model ?? completed.output?.base_model ?? completed.output?.pbr_model;
   if (!stlUrl) {
     throw new Error("Tripo STL conversion succeeded but returned no STL URL");
@@ -128,8 +139,8 @@ async function convertTripoModel(baseUrl: string, apiKey: string, originalTaskId
   return stlFile;
 }
 
-async function pollTripoTask(baseUrl: string, apiKey: string, taskId: string, callId: string, name: string, emit?: TripoModelProgress): Promise<TripoTaskStatus> {
-  const deadline = Date.now() + pollTimeoutMs;
+async function pollTripoTask(baseUrl: string, apiKey: string, taskId: string, callId: string, name: string, options: ReturnType<typeof getTripoOptions>, emit?: TripoModelProgress): Promise<TripoTaskStatus> {
+  const deadline = Date.now() + options.pollTimeoutMs;
   let pollCount = 0;
 
   await emitProgress(emit, { type: "tool.started", callId, name, inputSummary: taskId });
@@ -153,7 +164,7 @@ async function pollTripoTask(baseUrl: string, apiKey: string, taskId: string, ca
       throw new Error(task.error_msg ?? task.message ?? `Tripo task ${task.status}`);
     }
 
-    await wait(pollIntervalMs);
+    await wait(options.pollIntervalMs);
   }
 
   throw new Error("Tripo task timed out");
@@ -327,6 +338,11 @@ function describeFetchFailure(error: unknown) {
 
 async function emitProgress(emit: TripoModelProgress | undefined, event: TripoModelProgressEvent) {
   await emit?.(event);
+}
+
+function parsePositiveInt(value: string | undefined, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : fallback;
 }
 
 function wait(ms: number) {

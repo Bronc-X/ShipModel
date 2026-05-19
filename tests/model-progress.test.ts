@@ -9,7 +9,7 @@ describe("model build event progress", () => {
   it("builds progress from real job and tool events", () => {
     const events: ModelJobEvent[] = [
       { type: "job.started", jobId, title: "生成 STL 模型", at: "2026-05-18T00:00:00.000Z" },
-      { type: "tool.started", jobId, callId: "tripo_generate_model", name: "tripo_image_to_model", inputSummary: "推荐建模图", at: "2026-05-18T00:00:01.000Z" },
+      { type: "tool.started", jobId, callId: "tripo_generate_model", name: "tripo_image_to_model", inputSummary: "建模图", at: "2026-05-18T00:00:01.000Z" },
       { type: "tool.completed", jobId, callId: "tripo_generate_model", name: "tripo_image_to_model", outputSummary: "model.stl", at: "2026-05-18T00:00:02.000Z" },
       { type: "artifact.created", jobId, artifactId: `${jobId}:stl`, kind: "stl", title: "可下载 STL 文件", data: { href: "/runs/event-progress-run/model.stl" }, at: "2026-05-18T00:00:03.000Z" }
     ];
@@ -48,7 +48,8 @@ describe("model build event progress", () => {
               style: "航展涂装",
               primaryColor: "#245b70",
               accentColor: "#f3ead7",
-              label: "07",
+              label: "",
+              markingText: "TONI ASIA",
               description: "失败流测试。",
               targetLengthMm: 120
             },

@@ -4,8 +4,8 @@ import express from "express";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { ensureRunDir, getRunDir, loadRun, publicRunFile, runsDir, saveRun } from "./storage.js";
-import type { ConceptProgressEvent, ConceptResponse, GenerateModelRequest, GenerateModelResponse, HandshakeResponse, ModelJobEvent, ModelRequest, ModelRun } from "./types.js";
-import { openAiConcepts } from "./providers/openaiImages.js";
+import type { ConceptProgressEvent, ConceptResponse, GenerateModelRequest, GenerateModelResponse, HandshakeResponse, ModelJobEvent, ModelRequest, ModelRun, ReviseConceptRequest, ReviseConceptResponse } from "./types.js";
+import { openAiConcepts, reviseOpenAiConcept } from "./providers/openaiImages.js";
 import { generateTripoModel } from "./providers/tripoModel.js";
 import { validateStl } from "./validate.js";
 import { formatValidationReasons, validateInput } from "./validation.js";
@@ -120,7 +120,7 @@ async function streamConceptProgress(input: ModelRequest, response: express.Resp
     send({ phase: "validating", progress: 12, message: "参数校验通过，正在创建生成记录。" });
     const runId = randomUUID();
     await ensureRunDir(runId);
-    send({ phase: "image", progress: 22, message: "正在生成第 1 张概念图。", runId, conceptIndex: 1, totalConcepts: 2 });
+    send({ phase: "image", progress: 22, message: "正在生成概念图。", runId, conceptIndex: 1, totalConcepts: 1 });
 
     if (!process.env.OPENAI_API_KEY) {
       response.status(503);
@@ -131,8 +131,8 @@ async function streamConceptProgress(input: ModelRequest, response: express.Resp
 
     const concepts = await openAiConcepts(input, runId, {
       onConceptDone: (_concept, index, total) => {
-        const progress = index === 1 ? 56 : 84;
-        const nextMessage = index < total ? `第 ${index} 张已完成，正在生成第 ${index + 1} 张。` : "两张概念图已生成，正在保存结果。";
+        const progress = index < total ? 56 : 84;
+        const nextMessage = index < total ? `第 ${index} 张已完成，正在生成第 ${index + 1} 张。` : "概念图已完成，正在保存结果。";
         send({ phase: "image", progress, message: nextMessage, runId, conceptIndex: index, totalConcepts: total });
       }
     });
@@ -163,6 +163,39 @@ async function streamConceptProgress(input: ModelRequest, response: express.Resp
     response.end();
   }
 }
+
+app.post("/api/concepts/revise", async (request, response) => {
+  try {
+    const body = request.body as ReviseConceptRequest;
+    const run = await loadRun(body.runId);
+    const concept = run.concepts.find((item) => item.id === body.conceptId);
+    if (!concept) {
+      response.status(404).json({ error: "Concept not found" });
+      return;
+    }
+    if (!process.env.OPENAI_API_KEY) {
+      response.status(503).json({
+        error: "OpenAI is not configured",
+        message: "修改概念图前，请先设置 OPENAI_API_KEY。"
+      });
+      return;
+    }
+
+    const revised = await reviseOpenAiConcept(run.input, concept, body.instruction);
+    run.concepts = [revised, ...run.concepts.filter((item) => item.id !== concept.id)];
+    run.selectedConceptId = revised.id;
+    run.updatedAt = new Date().toISOString();
+    await saveRun(run);
+
+    const payload: ReviseConceptResponse = { run, concept: revised };
+    response.json(payload);
+  } catch (error) {
+    response.status(500).json({
+      error: "Concept revision failed",
+      message: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+});
 
 app.post("/api/models", async (request, response) => {
   if (String(request.headers.accept ?? "").includes("application/x-ndjson")) {

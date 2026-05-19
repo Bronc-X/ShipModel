@@ -1124,6 +1124,25 @@ img {
   background: color-mix(in srgb, var(--tb-primary) 10%, var(--tb-surface));
 }
 
+.concept-revision {
+  display: grid;
+  gap: 12px;
+  width: min(720px, 100%);
+  border: 1px solid var(--tb-line);
+  border-radius: 8px;
+  background: var(--tb-surface);
+  padding: 16px;
+}
+
+.concept-revision p {
+  margin: 4px 0 0;
+  color: var(--tb-muted);
+}
+
+.concept-revision .button {
+  justify-self: start;
+}
+
 .progress-page {
   display: grid;
   position: relative;

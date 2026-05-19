@@ -10,6 +10,7 @@ const validInput: ModelRequest = {
   primaryColor: "#f3ead7",
   accentColor: "#2e3538",
   label: "",
+  markingText: "",
   description: "调整参数后重新生成概念图。",
   targetLengthMm: 250
 };

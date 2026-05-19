@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 const pixel =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
 
-test("概念图确认页默认推荐建模图，也允许改用备选图", async ({ page }) => {
+test("概念图确认页只显示一张建模图，并允许自然语言继续改图", async ({ page }) => {
   await page.route("**/api/handshake", async (route) => {
     await route.fulfill({
       contentType: "application/json",
@@ -29,29 +29,22 @@ test("概念图确认页默认推荐建模图，也允许改用备选图", async
       contentType: "application/x-ndjson",
       body: [
         { phase: "queued", progress: 5, message: "已接收概念图生成请求。" },
-        { phase: "image", progress: 56, message: "第 1 张已完成，正在生成第 2 张。", runId: "concept-card-test", conceptIndex: 1, totalConcepts: 2 },
+        { phase: "image", progress: 84, message: "概念图已完成，正在保存结果。", runId: "concept-card-test", conceptIndex: 1, totalConcepts: 1 },
         {
           phase: "complete",
           progress: 100,
           message: "概念图已生成。",
           runId: "concept-card-test",
-          totalConcepts: 2,
+          totalConcepts: 1,
           response: {
             runId: "concept-card-test",
             concepts: [
               {
                 id: "concept-a",
-                title: "推荐建模图",
+                title: "建模图",
                 imageUrl: `data:image/png;base64,${pixel}`,
                 prompt: "Create a polished studio render of a realistic modern twin-engine fighter aircraft scale model.",
                 feedback: "现代战机模型主体完整、遮挡少，轮廓和落地姿态更适合交给 Tripo 生成 STL。"
-              },
-              {
-                id: "concept-b",
-                title: "备选参考图",
-                imageUrl: `data:image/png;base64,${pixel}`,
-                prompt: "Create a polished studio render of a realistic modern twin-engine fighter aircraft scale model.",
-                feedback: "现代战机模型顶面、侧面和结构分区更清楚，适合作为备选或对照图。"
               }
             ]
           }
@@ -59,22 +52,61 @@ test("概念图确认页默认推荐建模图，也允许改用备选图", async
       ].map((event) => JSON.stringify(event)).join("\n") + "\n"
     });
   });
+  await page.route("**/api/concepts/revise", async (route) => {
+    const concept = {
+      id: "concept-a-revised",
+      title: "修改后的建模图",
+      imageUrl: `data:image/png;base64,${pixel}`,
+      prompt: "revised prompt",
+      feedback: "已按你的描述调整：飞机的机颈再往上调 8 到 10 度。"
+    };
+    const run = {
+      runId: "concept-card-test",
+      input: {
+        category: "aircraft",
+        subtype: "jet",
+        style: "航展涂装",
+        primaryColor: "#245b70",
+        accentColor: "#f3ead7",
+        label: "",
+        markingText: "TONI ASIA",
+        description: "Create a polished studio render of a realistic modern twin-engine fighter aircraft scale model.",
+        targetLengthMm: 120
+      },
+      concepts: [concept],
+      selectedConceptId: concept.id,
+      status: undefined,
+      reasons: [],
+      files: {},
+      createdAt: "2026-05-12T00:00:00.000Z",
+      updatedAt: "2026-05-12T00:00:01.000Z"
+    };
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        run,
+        concept
+      })
+    });
+  });
 
   await page.goto("/configure");
-  await page.getByRole("button", { name: "生成 2 张概念图" }).click();
+  await page.getByRole("button", { name: "生成概念图" }).click();
 
   await expect(page.getByRole("progressbar", { name: "概念图生成进度" })).toHaveAttribute("aria-valuenow", "100");
   await expect(page.getByRole("heading", { name: "确认建模输入图" })).toBeVisible();
 
-  const firstCard = page.getByRole("button", { name: /推荐建模图/ });
-  const secondCard = page.getByRole("button", { name: /备选参考图/ });
+  const firstCard = page.getByRole("button", { name: /建模图/ });
 
   await expect(firstCard).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("button", { name: /使用推荐图生成 STL/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /使用这张图生成 STL/ })).toBeVisible();
   await expect(page.getByText("Create a polished studio render")).toHaveCount(0);
+  await expect(page.locator(".concept-card")).toHaveCount(1);
+  await expect(page.getByText("当前建模图")).toBeVisible();
 
-  await secondCard.click();
-  await expect(secondCard).toHaveAttribute("aria-pressed", "true");
-  await expect(firstCard).toHaveAttribute("aria-pressed", "false");
-  await expect(page.getByRole("button", { name: /使用备选图生成 STL/ })).toBeVisible();
+  await page.getByRole("textbox", { name: "继续修改概念图" }).fill("飞机的机颈可以再往上调 8 到 10 度");
+  await page.getByRole("button", { name: "提交修改" }).click();
+
+  await expect(page.getByRole("button", { name: /修改后的建模图/ })).toBeVisible();
+  await expect(page.getByText("已按你的描述调整")).toBeVisible();
 });

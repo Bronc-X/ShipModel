@@ -11,7 +11,7 @@ export const categories: Array<{
     name: "车辆",
     description: "紧凑轮廓、夸张轮拱、适合玩具模型的姿态。",
     subtypes: [
-      { id: "race-car", name: "赛车", note: "低趴、速度感、带编号" },
+      { id: "race-car", name: "赛车", note: "低趴、速度感、宽轮拱" },
       { id: "off-road", name: "越野车", note: "厚重、抬高、结实" },
       { id: "future-sports", name: "未来跑车", note: "流线型概念外壳" }
     ]
@@ -53,9 +53,10 @@ export const defaultInput: ModelRequest = {
   category: "vehicle",
   subtype: "race-car",
   style: "赛道日",
-  primaryColor: "#c7352f",
-  accentColor: "#f3ead7",
-  label: "07",
+  primaryColor: "#2e3538",
+  accentColor: "#2e3538",
+  label: "",
+  markingText: "",
   description: "一个结实的冠军赛车模型，带有圆润顺滑的外壳面板。",
   targetLengthMm: 120
 };

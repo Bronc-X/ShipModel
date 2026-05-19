@@ -21,6 +21,7 @@ export interface ModelRequest {
   primaryColor: string;
   accentColor: string;
   label: string;
+  markingText?: string;
   description: string;
   targetLengthMm: number;
 }

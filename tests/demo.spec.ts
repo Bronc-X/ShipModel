@@ -9,25 +9,19 @@ const pixel = "iVBORw0KGgo=";
 function conceptStreamBody(runId: string) {
   return [
     { phase: "queued", progress: 5, message: "已接收概念图生成请求。" },
-    { phase: "image", progress: 56, message: "第 1 张已完成，正在生成第 2 张。", runId, conceptIndex: 1, totalConcepts: 2 },
+    { phase: "image", progress: 84, message: "概念图已完成，正在保存结果。", runId, conceptIndex: 1, totalConcepts: 1 },
     {
       phase: "complete",
       progress: 100,
       message: "概念图已生成。",
       runId,
-      totalConcepts: 2,
+      totalConcepts: 1,
       response: {
         runId,
         concepts: [
           {
             id: `${runId}-a`,
-            title: "推荐建模图",
-            imageUrl: `data:image/png;base64,${pixel}`,
-            prompt: "test"
-          },
-          {
-            id: `${runId}-b`,
-            title: "备选参考图",
+            title: "建模图",
             imageUrl: `data:image/png;base64,${pixel}`,
             prompt: "test"
           }
@@ -51,14 +45,15 @@ async function writeReadyRun(runId: string) {
           style: "航展涂装",
           primaryColor: "#245b70",
           accentColor: "#f3ead7",
-          label: "07",
+          label: "",
+          markingText: "TONI ASIA",
           description: "用于进度页完成态测试的客机模型。",
           targetLengthMm: 120
         },
         concepts: [
           {
             id: `${runId}-concept-a`,
-            title: "推荐建模图",
+            title: "建模图",
             imageUrl: `data:image/png;base64,${pixel}`,
             prompt: "test"
           }
@@ -131,14 +126,15 @@ test("STL 进度展示真实后端事件流并完成交付", async ({ page }) =>
         style: "航展涂装",
         primaryColor: "#245b70",
         accentColor: "#f3ead7",
-        label: "07",
+        label: "",
+        markingText: "TONI ASIA",
         description: "用于真实事件流测试的客机模型。",
         targetLengthMm: 120
       },
       concepts: [
         {
           id: "stl-progress-mock-a",
-          title: "推荐建模图",
+          title: "建模图",
           imageUrl: `data:image/png;base64,${pixel}`,
           prompt: "test"
         }
@@ -154,7 +150,7 @@ test("STL 进度展示真实后端事件流并完成交付", async ({ page }) =>
     };
     const events = [
       { type: "job.started", jobId: run.runId, title: "生成 STL 模型", at: "2026-05-12T00:00:00.000Z" },
-      { type: "tool.started", jobId: run.runId, callId: "tripo_generate_model", name: "tripo_image_to_model", inputSummary: "推荐建模图", at: "2026-05-12T00:00:01.000Z" },
+      { type: "tool.started", jobId: run.runId, callId: "tripo_generate_model", name: "tripo_image_to_model", inputSummary: "建模图", at: "2026-05-12T00:00:01.000Z" },
       { type: "tool.completed", jobId: run.runId, callId: "tripo_generate_model", name: "tripo_image_to_model", outputSummary: "model.stl", at: "2026-05-12T00:00:02.000Z" },
       { type: "tool.started", jobId: run.runId, callId: "validate_stl", name: "validate_stl", inputSummary: "model.stl", at: "2026-05-12T00:00:03.000Z" },
       { type: "tool.completed", jobId: run.runId, callId: "validate_stl", name: "validate_stl", outputSummary: "STL 文件通过基础校验", at: "2026-05-12T00:00:04.000Z" },
@@ -169,9 +165,9 @@ test("STL 进度展示真实后端事件流并完成交付", async ({ page }) =>
   });
 
   await page.goto("/configure");
-  await page.getByRole("button", { name: "生成 2 张概念图" }).click();
+  await page.getByRole("button", { name: "生成概念图" }).click();
   await expect(page).toHaveURL(/\/concept$/);
-  await page.getByRole("button", { name: "使用推荐图生成 STL" }).click();
+  await page.getByRole("button", { name: "使用这张图生成 STL" }).click();
   await expect(page).toHaveURL(/\/generate$/);
 
   await expect(page.getByText("真实任务进度")).toBeVisible();
@@ -215,14 +211,15 @@ test("STL 失败事件流不会显示模型生成完成", async ({ page }) => {
         style: "航展涂装",
         primaryColor: "#245b70",
         accentColor: "#f3ead7",
-        label: "07",
+        label: "",
+        markingText: "TONI ASIA",
         description: "用于真实失败事件流测试的客机模型。",
         targetLengthMm: 120
       },
       concepts: [
         {
           id: "stl-progress-failed-a",
-          title: "推荐建模图",
+          title: "建模图",
           imageUrl: `data:image/png;base64,${pixel}`,
           prompt: "test"
         }
@@ -247,8 +244,8 @@ test("STL 失败事件流不会显示模型生成完成", async ({ page }) => {
   });
 
   await page.goto("/configure");
-  await page.getByRole("button", { name: "生成 2 张概念图" }).click();
-  await page.getByRole("button", { name: "使用推荐图生成 STL" }).click();
+  await page.getByRole("button", { name: "生成概念图" }).click();
+  await page.getByRole("button", { name: "使用这张图生成 STL" }).click();
 
   await expect(page).toHaveURL(/\/failed\/stl-progress-failed$/);
   await expect(page.getByRole("heading", { name: "这次没有生成成功" })).toBeVisible();
@@ -436,7 +433,7 @@ test("辅助色会随概念图请求提交", async ({ page }) => {
 
   await page.goto("/configure");
   await page.getByRole("button", { name: "辅助色 石墨黑" }).click();
-  await page.getByRole("button", { name: "生成 2 张概念图" }).click();
+  await page.getByRole("button", { name: "生成概念图" }).click();
 
   await expect.poll(() => postedBody?.accentColor).toBe("#2e3538");
 });
@@ -473,14 +470,14 @@ test("返回参数页调整 250mm 后可以再次生成概念图", async ({ page
   });
 
   await page.goto("/configure");
-  await page.getByRole("button", { name: "生成 2 张概念图" }).click();
+  await page.getByRole("button", { name: "生成概念图" }).click();
   await expect(page).toHaveURL(/\/concept$/);
 
   await page.getByRole("button", { name: "返回修改参数" }).click();
   await expect(page).toHaveURL(/\/configure$/);
 
   await page.getByLabel("X Axis").fill("250");
-  await page.getByRole("button", { name: "生成 2 张概念图" }).click();
+  await page.getByRole("button", { name: "生成概念图" }).click();
 
   await expect(page).toHaveURL(/\/concept$/);
   await expect(page.getByRole("alert")).toHaveCount(0);
@@ -494,10 +491,10 @@ test("缺少供应商密钥时走真实错误路径", async ({ page, request }) 
   await page.goto("/configure");
   await expect(page.getByText(/openai:缺失/i)).toBeVisible();
 
-  await page.getByRole("button", { name: "生成 2 张概念图" }).click();
+  await page.getByRole("button", { name: "生成概念图" }).click();
   await expect(page).toHaveURL(/\/configure$/);
   await expect(page.getByRole("alert")).toContainText("生成概念图前，请先设置 OPENAI_API_KEY。");
-  await expect(page.getByText("推荐建模图")).toHaveCount(0);
+  await expect(page.getByText("建模图")).toHaveCount(0);
 });
 
 test("真实供应商可以生成概念图、创建 STL 并预览非空 3D 模型", async ({ page }) => {
@@ -510,14 +507,14 @@ test("真实供应商可以生成概念图、创建 STL 并预览非空 3D 模�
   await page
     .getByPlaceholder("写清外形参考、结构强度、可打印细节，例如加厚机翼或稳固甲板。")
     .fill("一艘紧凑的仪式感战舰，带有稳固的展示船体。");
-  await page.getByRole("button", { name: "生成 2 张概念图" }).click();
+  await page.getByRole("button", { name: "生成概念图" }).click();
 
   await expect(page).toHaveURL(/\/concept$/);
-  await expect(page.getByText("推荐建模图")).toBeVisible();
-  await expect(page.getByText("备选参考图")).toBeVisible();
+  await expect(page.getByText("建模图")).toBeVisible();
+  await expect(page.locator(".concept-card")).toHaveCount(1);
+  await expect(page.getByText("当前建模图")).toBeVisible();
 
-  await page.getByRole("button", { name: /备选参考图/ }).click();
-  await page.getByRole("button", { name: "使用备选图生成 STL" }).click();
+  await page.getByRole("button", { name: "使用这张图生成 STL" }).click();
 
   await expect(page).toHaveURL(/\/download|\/failed$/, { timeout: 600_000 });
 

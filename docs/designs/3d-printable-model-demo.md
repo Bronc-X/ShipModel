@@ -8,8 +8,8 @@ The demo proves this flow:
 
 1. The user chooses a model category and fixed options.
 2. The user adds one short natural-language description.
-3. The system uses `gpt-image-2` to generate two polished concept renders.
-4. The user selects one concept.
+3. The system uses `gpt-image-2` to generate one polished concept render.
+4. The user can revise that concept with natural-language instructions before sending it to 3D generation.
 5. The system sends the selected image, and later optional multi-view references, to an image-to-3D provider.
 6. The system exports printable files.
 7. The system returns only `Ready` or `Failed`.
@@ -61,8 +61,8 @@ Color is constrained, not explored as a primary feature.
 ```mermaid
 flowchart TD
   A["Choose category and options"] --> B["Add short description"]
-  B --> C["Generate two concept renders with gpt-image-2"]
-  C --> D["User selects one render"]
+  B --> C["Generate one concept render with gpt-image-2"]
+  C --> D["User revises or accepts the render"]
   D --> E["Image-to-3D provider generates mesh"]
   E --> F["Normalize, repair, and inspect mesh"]
   F --> G{"Printable enough?"}
@@ -94,7 +94,7 @@ Example:
 
 ### Image Generation
 
-Use OpenAI `gpt-image-2` for two polished concept renders.
+Use OpenAI `gpt-image-2` for one polished concept render, then use image edit requests for natural-language revisions.
 
 Prompt constraints:
 
@@ -206,8 +206,8 @@ TRIPO_BASE_URL=https://api.tripo3d.ai/v2/openapi
 The demo is successful when:
 
 1. A user can create a vehicle, aircraft, or ship prompt from guided options.
-2. The app generates two concept images.
-3. The user can select one concept image.
+2. The app generates one concept image.
+3. The user can revise or accept the concept image.
 4. The app calls an image-to-3D provider and stores the result.
 5. The app shows `Ready` or `Failed`.
 6. A `Ready` run exposes an `STL` download.

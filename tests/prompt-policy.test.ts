@@ -10,6 +10,7 @@ const baseInput: ModelRequest = {
   primaryColor: "#245b70",
   accentColor: "#f3ead7",
   label: "07",
+  markingText: "",
   description: "真实世界无人机比例，干净的机身和长翼展。",
   targetLengthMm: 120
 };
@@ -41,7 +42,7 @@ describe("image prompt policy", () => {
     assert.doesNotMatch(prompt, /stylized warship|weapon emphasis/i);
   });
 
-  it("passes selected dimensions, style, color, and number into render prompts", () => {
+  it("passes selected dimensions, style, and colors into render prompts without the removed number field", () => {
     const prompt = buildImagePrompt(
       {
         ...baseInput,
@@ -60,8 +61,23 @@ describe("image prompt policy", () => {
     assert.match(prompt, /复古套件|vintage kit/i);
     assert.match(prompt, /#e5b843|rescue yellow/i);
     assert.match(prompt, /#2e3538|graphite black/i);
-    assert.match(prompt, /exact number "07"/i);
+    assert.doesNotMatch(prompt, /exact number "07"/i);
     assert.match(prompt, /racing car|track-day body kit/i);
+  });
+
+  it("uses optional model marking text instead of the old number field", () => {
+    const prompt = buildImagePrompt(
+      {
+        ...baseInput,
+        label: "07",
+        markingText: "TONI ASIA"
+      },
+      "A"
+    );
+
+    assert.match(prompt, /TONI ASIA/);
+    assert.match(prompt, /raised simple marking/i);
+    assert.doesNotMatch(prompt, /exact number "07"/i);
   });
 
   it("treats user geometry requests as mandatory overrides while keeping printability constraints", () => {
