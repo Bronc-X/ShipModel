@@ -1,6 +1,6 @@
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
-import { fetch as undiciFetch, FormData, ProxyAgent, type Dispatcher } from "undici";
+import { fetch as undiciFetch, ProxyAgent, type Dispatcher } from "undici";
 import type { ModelRun } from "../types.js";
 import { getRunDir } from "../storage.js";
 
@@ -30,7 +30,7 @@ interface TripoTaskStatus {
 }
 
 type TripoImageInput = {
-  type: "jpg";
+  type: "png";
   url?: string;
   file_token?: string;
 };
@@ -42,14 +42,26 @@ export type TripoModelProgressEvent =
 type TripoModelProgress = (event: TripoModelProgressEvent) => Promise<void> | void;
 
 const defaultBaseUrl = "https://api.tripo3d.ai/v2/openapi";
-const tripoProxyUrl = process.env.TRIPO_PROXY_URL || process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
+const tripoProxyUrl = resolveTripoProxyUrl(process.env);
 const tripoDispatcher = tripoProxyUrl ? new ProxyAgent(tripoProxyUrl) : undefined;
+
+export function resolveTripoProxyUrl(env: NodeJS.ProcessEnv) {
+  if (env.TRIPO_PROXY_URL) return env.TRIPO_PROXY_URL;
+  if (env.TRIPO_USE_SYSTEM_PROXY === "true") return env.HTTPS_PROXY || env.HTTP_PROXY;
+  return undefined;
+}
 
 export function getTripoOptions(env: NodeJS.ProcessEnv = process.env) {
   return {
-    pollIntervalMs: parsePositiveInt(env.TRIPO_POLL_INTERVAL_MS, 3000),
+    pollIntervalMs: parsePositiveInt(env.TRIPO_POLL_INTERVAL_MS, 2000),
     pollTimeoutMs: parsePositiveInt(env.TRIPO_POLL_TIMEOUT_MS, 1000 * 60 * 10),
-    downloadIntermediateGlb: env.TRIPO_DOWNLOAD_INTERMEDIATE_GLB === "true"
+    networkRetries: parsePositiveInt(env.TRIPO_NETWORK_RETRIES, 3),
+    retryDelayMs: parsePositiveInt(env.TRIPO_RETRY_DELAY_MS, 1000),
+    downloadIntermediateGlb: env.TRIPO_DOWNLOAD_INTERMEDIATE_GLB === "true",
+    modelVersion: env.TRIPO_MODEL_VERSION ?? "v3.1-20260211",
+    exportUv: parseBoolean(env.TRIPO_EXPORT_UV, false),
+    texture: parseBoolean(env.TRIPO_TEXTURE, false),
+    pbr: parseBoolean(env.TRIPO_PBR, false)
   };
 }
 
@@ -80,9 +92,10 @@ export async function generateTripoModel(run: ModelRun, emit?: TripoModelProgres
     body: JSON.stringify({
       type: "image_to_model",
       file,
-      texture: false,
-      pbr: false,
-      model_version: process.env.TRIPO_MODEL_VERSION ?? "v3.1-20260211"
+      texture: options.texture,
+      pbr: options.pbr,
+      model_version: options.modelVersion,
+      export_uv: options.exportUv
     })
   });
 
@@ -171,16 +184,21 @@ async function pollTripoTask(baseUrl: string, apiKey: string, taskId: string, ca
 }
 
 async function tripoFetch<T>(baseUrl: string, apiKey: string, segments: string[], init: RequestInit = {}) {
-  const response = await tripoHttpFetch(joinUrl(baseUrl, segments), {
-    ...init,
-    dispatcher: tripoDispatcher,
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      ...init.headers
+  const options = getTripoOptions();
+  const response = await withTripoNetworkRetry("Tripo request", options, async () => {
+    try {
+      return await tripoHttpFetch(joinUrl(baseUrl, segments), {
+        ...init,
+        dispatcher: tripoDispatcher,
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+          ...init.headers
+        }
+      } as TripoRequestInit);
+    } catch (error) {
+      throw new Error(describeFetchFailure(error));
     }
-  } as TripoRequestInit).catch((error) => {
-    throw new Error(`Tripo request failed before response: ${describeFetchFailure(error)}`);
   });
   const text = await response.text();
   const json = text ? (JSON.parse(text) as TripoEnvelope<T> | T) : undefined;
@@ -208,7 +226,7 @@ async function tripoFetch<T>(baseUrl: string, apiKey: string, segments: string[]
 
 async function toTripoImageInput(baseUrl: string, apiKey: string, imageUrl: string, emit?: TripoModelProgress): Promise<TripoImageInput> {
   if (imageUrl.startsWith("http://") || imageUrl.startsWith("https://")) {
-    return { type: "jpg", url: imageUrl };
+    return { type: "png", url: imageUrl };
   }
 
   if (!imageUrl.startsWith("data:image/")) {
@@ -225,27 +243,35 @@ async function toTripoImageInput(baseUrl: string, apiKey: string, imageUrl: stri
     throw new Error("Concept image data URL must be base64 encoded");
   }
 
-  const token = await uploadImage(baseUrl, apiKey, Buffer.from(base64, "base64"), extensionForMime(match[1]), emit);
-  return { type: "jpg", file_token: token };
+  const mime = normalizeImageMime(match[1]);
+  const bytes = Buffer.from(base64, "base64");
+  validateImageBytes(bytes, mime);
+  const token = await uploadImage(baseUrl, apiKey, bytes, extensionForMime(mime), mime, emit);
+  return { type: "png", file_token: token };
 }
 
-async function uploadImage(baseUrl: string, apiKey: string, bytes: Buffer, extension: string, emit?: TripoModelProgress) {
-  const form = new FormData();
-  const uploadBytes = new Uint8Array(bytes.byteLength);
-  uploadBytes.set(bytes);
-  const blob = new Blob([uploadBytes]);
-  form.append("file", blob, `concept.${extension}`);
-
+async function uploadImage(baseUrl: string, apiKey: string, bytes: Buffer, extension: string, mime: string, emit?: TripoModelProgress) {
   await emitProgress(emit, { type: "tool.started", callId: "tripo_upload_image", name: "tripo_upload_image", inputSummary: `concept.${extension}` });
-  const response = await tripoHttpFetch(joinUrl(baseUrl, ["upload"]), {
-    method: "POST",
-    dispatcher: tripoDispatcher,
-    headers: {
-      Authorization: `Bearer ${apiKey}`
-    },
-    body: form
-  } as TripoRequestInit).catch((error) => {
-    throw new Error(`Tripo image upload failed before response: ${describeFetchFailure(error)}`);
+  const options = getTripoOptions();
+  const response = await withTripoNetworkRetry("Tripo image upload", options, async () => {
+    const form = new FormData();
+    const uploadBytes = new Uint8Array(bytes.byteLength);
+    uploadBytes.set(bytes);
+    const blob = new Blob([uploadBytes], { type: mime });
+    form.append("file", blob, `concept.${extension}`);
+
+    try {
+      return await tripoHttpFetch(joinUrl(baseUrl, ["upload"]), {
+        method: "POST",
+        dispatcher: tripoDispatcher,
+        headers: {
+          Authorization: `Bearer ${apiKey}`
+        },
+        body: form
+      } as TripoRequestInit);
+    } catch (error) {
+      throw new Error(describeFetchFailure(error));
+    }
   });
   const text = await response.text();
   const json = text ? (JSON.parse(text) as TripoEnvelope<{ image_token?: string; file_token?: string }>) : undefined;
@@ -264,10 +290,15 @@ async function uploadImage(baseUrl: string, apiKey: string, bytes: Buffer, exten
 }
 
 async function downloadModel(modelUrl: string, runId: string, fileName: string) {
-  const response = await tripoHttpFetch(modelUrl, {
-    dispatcher: tripoDispatcher
-  } as TripoRequestInit).catch((error) => {
-    throw new Error(`Tripo model download failed before response: ${describeFetchFailure(error)}`);
+  const options = getTripoOptions();
+  const response = await withTripoNetworkRetry("Tripo model download", options, async () => {
+    try {
+      return await tripoHttpFetch(modelUrl, {
+        dispatcher: tripoDispatcher
+      } as TripoRequestInit);
+    } catch (error) {
+      throw new Error(describeFetchFailure(error));
+    }
   });
   if (!response.ok) {
     throw new Error(`Tripo model download failed: ${response.status}`);
@@ -317,6 +348,26 @@ function extensionForMime(mime: string) {
   return "jpg";
 }
 
+function normalizeImageMime(mime: string) {
+  const normalized = mime.split(";")[0]?.trim().toLowerCase();
+  if (normalized === "image/png" || normalized === "image/webp" || normalized === "image/jpeg") {
+    return normalized;
+  }
+  return "image/png";
+}
+
+function validateImageBytes(bytes: Buffer, mime: string) {
+  if (bytes.byteLength < 64) {
+    throw new Error("概念图数据不完整，请重新生成概念图后再提交 Tripo。");
+  }
+  const png = bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  const jpeg = bytes[0] === 0xff && bytes[1] === 0xd8;
+  const webp = bytes.subarray(0, 4).toString("ascii") === "RIFF" && bytes.subarray(8, 12).toString("ascii") === "WEBP";
+  if ((mime === "image/png" && !png) || (mime === "image/jpeg" && !jpeg) || (mime === "image/webp" && !webp)) {
+    throw new Error("概念图格式与实际数据不一致，请重新生成概念图后再提交 Tripo。");
+  }
+}
+
 function extensionFromUrl(url: string) {
   const pathname = new URL(url).pathname;
   const ext = path.extname(pathname).replace(".", "").toLowerCase();
@@ -336,6 +387,48 @@ function describeFetchFailure(error: unknown) {
   return error.message;
 }
 
+export async function withTripoNetworkRetry<T>(
+  label: string,
+  options: Pick<ReturnType<typeof getTripoOptions>, "networkRetries" | "retryDelayMs">,
+  operation: () => Promise<T>
+) {
+  const attempts = Math.max(1, options.networkRetries);
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (attempt >= attempts || !shouldRetryTripoNetworkError(error)) {
+        break;
+      }
+      await wait(options.retryDelayMs * attempt);
+    }
+  }
+
+  throw new Error(`${label} failed after ${attempts} attempts: ${describeRetryFailure(lastError)}`);
+}
+
+export function shouldRetryTripoNetworkError(error: unknown) {
+  const message = describeRetryFailure(error).toLowerCase();
+  return [
+    "timeout",
+    "und_err_connect_timeout",
+    "und_err_headers_timeout",
+    "econnreset",
+    "econnrefused",
+    "enotfound",
+    "eai_again",
+    "name resolution",
+    "fetch failed"
+  ].some((token) => message.includes(token));
+}
+
+function describeRetryFailure(error: unknown) {
+  return error instanceof Error ? error.message : String(error ?? "unknown network error");
+}
+
 async function emitProgress(emit: TripoModelProgress | undefined, event: TripoModelProgressEvent) {
   await emit?.(event);
 }
@@ -343,6 +436,11 @@ async function emitProgress(emit: TripoModelProgress | undefined, event: TripoMo
 function parsePositiveInt(value: string | undefined, fallback: number) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : fallback;
+}
+
+function parseBoolean(value: string | undefined, fallback: boolean) {
+  if (value === undefined) return fallback;
+  return value.toLowerCase() === "true";
 }
 
 function wait(ms: number) {

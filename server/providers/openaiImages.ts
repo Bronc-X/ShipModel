@@ -136,9 +136,11 @@ function conceptFeedback(input: ModelRequest, variant: "A" | "B") {
 function buildRevisionPrompt(input: ModelRequest, concept: Concept, instruction: string) {
   return [
     buildImagePrompt(input, "A"),
-    `Revise the existing concept titled "${concept.title}" with these user instructions: ${instruction}.`,
-    "Keep the same overall subject, printable hard-surface scale-model style, centered studio composition, and single connected printable geometry.",
-    "Apply requested geometry or color changes clearly, while keeping fragile details thickened and attached."
+    `Revision source: use the supplied image for the existing concept titled "${concept.title}" as the visual reference.`,
+    `User confirmation instruction to mix with the fixed step-one inputs: ${instruction}.`,
+    "Preserve the same camera angle, subject identity, silhouette, proportions, color placement, lighting, plain studio background, and printable hard-surface scale-model style wherever the user did not explicitly ask for a change.",
+    "Apply only the requested geometry, equipment, angle, layout, text, or color changes clearly. Do not redesign unrelated areas.",
+    "Keep the model as a single connected printable static display object; thicken and attach any fragile revised details."
   ].join(" ");
 }
 
@@ -236,6 +238,7 @@ const feedbackSubjects: Record<string, string> = {
 };
 
 const colorNames: Record<string, string> = {
+  "#050505": "黑色",
   "#c7352f": "信号红",
   "#245b70": "港湾蓝",
   "#f3ead7": "奶油白",

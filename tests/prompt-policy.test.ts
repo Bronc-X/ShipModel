@@ -7,9 +7,9 @@ const baseInput: ModelRequest = {
   category: "aircraft",
   subtype: "space-fighter",
   style: "未来实验室",
-  primaryColor: "#245b70",
-  accentColor: "#f3ead7",
-  label: "07",
+  primaryColor: "#050505",
+  accentColor: "#050505",
+  label: "",
   markingText: "",
   description: "真实世界无人机比例，干净的机身和长翼展。",
   targetLengthMm: 120
@@ -49,9 +49,6 @@ describe("image prompt policy", () => {
         category: "vehicle",
         subtype: "race-car",
         style: "复古套件",
-        primaryColor: "#e5b843",
-        accentColor: "#2e3538",
-        label: "07",
         targetLengthMm: 120
       },
       "A"
@@ -59,8 +56,7 @@ describe("image prompt policy", () => {
 
     assert.match(prompt, /120 x 55 x 38 mm/i);
     assert.match(prompt, /复古套件|vintage kit/i);
-    assert.match(prompt, /#e5b843|rescue yellow/i);
-    assert.match(prompt, /#2e3538|graphite black/i);
+    assert.match(prompt, /#050505|black/i);
     assert.doesNotMatch(prompt, /exact number "07"/i);
     assert.match(prompt, /racing car|track-day body kit/i);
   });
@@ -69,7 +65,7 @@ describe("image prompt policy", () => {
     const prompt = buildImagePrompt(
       {
         ...baseInput,
-        label: "07",
+        label: "",
         markingText: "TONI ASIA"
       },
       "A"

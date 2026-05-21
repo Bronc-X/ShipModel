@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildModelTimeline, getPipelineState } from "../src/toybox/modelJobProgress.ts";
+import { buildModelTimeline, getPipelineState, summarizeModelFailure } from "../src/toybox/modelJobProgress.ts";
 import type { ModelJobEvent } from "../src/types.ts";
 
 const jobId = "event-progress-run";
@@ -68,5 +68,21 @@ describe("model build event progress", () => {
 
     assert.ok(timeline.some((item) => item.message === "模型生成失败" && item.state === "error"));
     assert.equal(timeline.some((item) => item.message === "模型生成完成"), false);
+  });
+
+  it("classifies Tripo upload connection timeout as a network issue", () => {
+    const summary = summarizeModelFailure([
+      "Tripo image upload failed before response: fetch failed - UND_ERR_CONNECT_TIMEOUT - Connect Timeout Error (attempted address: api.tripo3d.ai:443, timeout: 10000ms)"
+    ]);
+
+    assert.equal(summary.title, "Tripo 上传连接超时");
+    assert.equal(summary.action, "先检查 WARP/VPN、DNS 或代理，再重试生成。");
+  });
+
+  it("shows a loading failure summary while a failed run is being restored", () => {
+    const summary = summarizeModelFailure([]);
+
+    assert.equal(summary.title, "正在读取失败原因");
+    assert.equal(summary.action, "正在从本地 API 恢复这次生成记录，请稍等。");
   });
 });

@@ -400,7 +400,7 @@ test("完整工作台壳层入口都可见并能响应", async ({ page }) => {
   await expect(page).toHaveURL(/\/configure$/);
 });
 
-test("辅助色会随概念图请求提交", async ({ page }) => {
+test("个性化信息默认留空，主色和辅助色默认黑色并随概念图请求提交", async ({ page }) => {
   let postedBody: Record<string, unknown> | null = null;
 
   await page.route("**/api/handshake", async (route) => {
@@ -432,10 +432,11 @@ test("辅助色会随概念图请求提交", async ({ page }) => {
   });
 
   await page.goto("/configure");
-  await page.getByRole("button", { name: "辅助色 石墨黑" }).click();
   await page.getByRole("button", { name: "生成概念图" }).click();
 
-  await expect.poll(() => postedBody?.accentColor).toBe("#2e3538");
+  await expect.poll(() => postedBody?.primaryColor).toBe("#050505");
+  await expect.poll(() => postedBody?.accentColor).toBe("#050505");
+  await expect.poll(() => postedBody?.markingText).toBe("");
 });
 
 test("返回参数页调整 250mm 后可以再次生成概念图", async ({ page }) => {

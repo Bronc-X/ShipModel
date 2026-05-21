@@ -132,7 +132,7 @@ async function streamConceptProgress(input: ModelRequest, response: express.Resp
     const concepts = await openAiConcepts(input, runId, {
       onConceptDone: (_concept, index, total) => {
         const progress = index < total ? 56 : 84;
-        const nextMessage = index < total ? `第 ${index} 张已完成，正在生成第 ${index + 1} 张。` : "概念图已完成，正在保存结果。";
+        const nextMessage = "概念图已完成，正在保存结果。";
         send({ phase: "image", progress, message: nextMessage, runId, conceptIndex: index, totalConcepts: total });
       }
     });

@@ -7,6 +7,7 @@ interface SubtypeProfile {
 }
 
 const colorNames: Record<string, string> = {
+  "#050505": "black",
   "#c7352f": "signal red",
   "#245b70": "harbor blue",
   "#f3ead7": "cream white",

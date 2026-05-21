@@ -4,6 +4,7 @@ import path from "node:path";
 
 const readyRunId = "deep-link-ready-run";
 const runDir = path.resolve("runs", readyRunId);
+const failedRunId = "deep-link-failed-run";
 
 test("可以通过 runId 深链接恢复下载页", async ({ page }) => {
   const readyRun = {
@@ -60,4 +61,48 @@ test("可以通过 runId 深链接恢复下载页", async ({ page }) => {
     "href",
     `/api/runs/${readyRunId}/download/stl`
   );
+});
+
+test("可以通过 runId 深链接恢复失败页的真实错误", async ({ page }) => {
+  const failedRun = {
+    runId: failedRunId,
+    input: {
+      category: "ship",
+      subtype: "warship",
+      style: "巡逻涂装",
+      primaryColor: "#050505",
+      accentColor: "#050505",
+      label: "",
+      markingText: "",
+      description: "用于失败深链接恢复测试的模型。",
+      targetLengthMm: 120
+    },
+    concepts: [
+      {
+        id: "concept-a-failed",
+        title: "失败测试概念图",
+        imageUrl: "data:image/png;base64,iVBORw0KGgo=",
+        prompt: "test"
+      }
+    ],
+    selectedConceptId: "concept-a-failed",
+    status: "Failed",
+    reasons: [
+      "Tripo image upload failed before response: fetch failed - UND_ERR_CONNECT_TIMEOUT - Connect Timeout Error (attempted address: api.tripo3d.ai:443, timeout: 10000ms)"
+    ],
+    files: {},
+    createdAt: "2026-05-11T00:00:00.000Z",
+    updatedAt: "2026-05-11T00:00:00.000Z"
+  };
+
+  await mkdir(path.resolve("runs", failedRunId), { recursive: true });
+  await writeFile(path.resolve("runs", failedRunId, "run.json"), JSON.stringify(failedRun, null, 2), "utf8");
+
+  await page.goto(`/failed/${failedRunId}`);
+
+  await expect(page).toHaveURL(new RegExp(`/failed/${failedRunId}$`));
+  await expect(page.getByRole("heading", { name: "Tripo 上传连接超时" })).toBeVisible();
+  await expect(page.getByText("先检查 WARP/VPN、DNS 或代理，再重试生成。")).toBeVisible();
+  await expect(page.getByText("UND_ERR_CONNECT_TIMEOUT")).toBeVisible();
+  await expect(page.getByText("减少细节或调整外形")).toHaveCount(0);
 });

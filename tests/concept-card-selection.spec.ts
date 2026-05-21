@@ -104,8 +104,8 @@ test("概念图确认页只显示一张建模图，并允许自然语言继续�
   await expect(page.locator(".concept-card")).toHaveCount(1);
   await expect(page.getByText("当前建模图")).toBeVisible();
 
-  await page.getByRole("textbox", { name: "继续修改概念图" }).fill("飞机的机颈可以再往上调 8 到 10 度");
-  await page.getByRole("button", { name: "提交修改" }).click();
+  await page.getByRole("textbox", { name: "再确认修改描述" }).fill("飞机的机颈可以再往上调 8 到 10 度");
+  await page.getByRole("button", { name: "重新生成确认图" }).click();
 
   await expect(page.getByRole("button", { name: /修改后的建模图/ })).toBeVisible();
   await expect(page.getByText("已按你的描述调整")).toBeVisible();

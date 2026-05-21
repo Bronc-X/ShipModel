@@ -55,6 +55,8 @@ describe("OpenAI concept image policy", () => {
     assert.ok(calls[0].body instanceof FormData);
     assert.match(String(calls[0].body.get("prompt")), /8 到 10 度/);
     assert.match(String(calls[0].body.get("prompt")), /绿色/);
+    assert.match(String(calls[0].body.get("prompt")), /Preserve the same camera angle/);
+    assert.match(String(calls[0].body.get("prompt")), /Do not redesign unrelated areas/);
     assert.ok(calls[0].body.get("image") instanceof Blob);
     assert.equal(revised.title, "修改后的建模图");
     assert.notEqual(revised.id, concept.id);

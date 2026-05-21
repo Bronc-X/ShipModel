@@ -16,7 +16,16 @@ let shuttingDown = false;
 
 try {
   await run(npmCommand, ["run", "typecheck"]);
-  await run(nodeCommand, ["--import", "tsx", "--test", "tests/model-viewer-rendering.test.ts"]);
+  await run(nodeCommand, [
+    "--import",
+    "tsx",
+    "--test",
+    "tests/model-viewer-rendering.test.ts",
+    "tests/concept-generation-policy.test.ts",
+    "tests/prompt-policy.test.ts",
+    "tests/model-progress.test.ts",
+    "tests/tripo-performance.test.ts"
+  ]);
 
   const api = spawnManaged(npmCommand, ["run", "dev:api"], {
     PORT: String(apiPort),

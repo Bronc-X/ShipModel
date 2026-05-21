@@ -46,6 +46,7 @@ export const stylesByCategory: Record<ModelCategory, string[]> = {
 };
 
 export const colors = [
+  { name: "黑色", value: "#050505" },
   { name: "信号红", value: "#c7352f" },
   { name: "港湾蓝", value: "#245b70" },
   { name: "奶油白", value: "#f3ead7" },
@@ -80,8 +81,8 @@ export function defaultInputForSubtype(category: ModelCategory, subtype: ModelSu
     category,
     subtype,
     style: firstStyle(category),
-    primaryColor: "#2e3538",
-    accentColor: "#2e3538",
+    primaryColor: "#050505",
+    accentColor: "#050505",
     label: "",
     markingText: "",
     description: defaultPrompts[subtype],

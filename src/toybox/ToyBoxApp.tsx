@@ -41,7 +41,7 @@ import {
   type LocalHistoryEntry,
   type MembershipSnapshot
 } from "./localHistory";
-import { buildModelTimeline, getPipelineState } from "./modelJobProgress";
+import { buildModelTimeline, getPipelineState, summarizeModelFailure } from "./modelJobProgress";
 import { parseRoute, routePaths, type RouteName, type RouteState } from "./routes";
 import { getSupabaseSyncState, syncHistoryEntry } from "./supabaseSync";
 
@@ -92,6 +92,7 @@ export function ToyBoxApp() {
   const [modelEvents, setModelEvents] = useState<ModelJobEvent[]>([]);
   const [conceptRevisionText, setConceptRevisionText] = useState("");
   const [revisionBusy, setRevisionBusy] = useState(false);
+  const [revisionProgress, setRevisionProgress] = useState<ConceptProgressEvent | null>(null);
   const [toast, setToast] = useState<{ tone: ToastTone; message: string } | null>(null);
   const [alert, setAlert] = useState<string | null>(null);
   const [previewMode, setPreviewMode] = useState<PreviewMode>("applied");
@@ -197,6 +198,7 @@ export function ToyBoxApp() {
     setRun(null);
     setConceptProgress(null);
     setConceptRevisionText("");
+    setRevisionProgress(null);
     setAlert(null);
     navigate("configure");
     showToast("已清空画布，可以开始下一版。");
@@ -231,6 +233,7 @@ export function ToyBoxApp() {
 
     setBusy(true);
     setAlert(null);
+    setRevisionProgress(null);
     setConceptProgress({ phase: "queued", progress: 3, message: "正在提交概念图生成请求。" });
     try {
       const response = await generateConcepts(input, setConceptProgress);
@@ -247,7 +250,7 @@ export function ToyBoxApp() {
         status: "concept"
       });
       navigate("concept");
-      showToast("概念图已生成，选中一张就能继续生成 STL。");
+      showToast("概念图已生成，确认或继续微调后就能生成 STL。");
     } catch (error) {
       showAlert(error instanceof Error ? error.message : "概念图生成失败。");
       navigate("configure", true);
@@ -291,7 +294,7 @@ export function ToyBoxApp() {
 
   async function handleReviseConcept() {
     if (!runId || !selectedConceptId) {
-      showAlert("请先生成概念图，再提交修改。");
+      showAlert("请先生成概念图，再提交再确认修改。");
       return;
     }
     const instruction = conceptRevisionText.trim();
@@ -302,8 +305,11 @@ export function ToyBoxApp() {
 
     setRevisionBusy(true);
     setAlert(null);
+    setRevisionProgress({ phase: "queued", progress: 8, message: "已接收再确认修改，正在锁定原图和第一步参数。" });
     try {
+      setRevisionProgress({ phase: "validating", progress: 24, message: "正在合并固定输入和你的局部修改描述。" });
       const response = await reviseConcept(runId, selectedConceptId, instruction);
+      setRevisionProgress({ phase: "image", progress: 84, message: "确认图已重新生成，正在更新当前建模图。" });
       restoreRun(response.run);
       setSelectedConceptId(response.concept.id);
       setConceptRevisionText("");
@@ -315,8 +321,11 @@ export function ToyBoxApp() {
         status: "concept"
       });
       showToast("概念图已按你的描述更新。");
+      setRevisionProgress({ phase: "complete", progress: 100, message: "再确认图已更新，可继续生成 STL。" });
     } catch (error) {
-      showAlert(error instanceof Error ? error.message : "概念图修改失败。");
+      const message = error instanceof Error ? error.message : "概念图修改失败。";
+      setRevisionProgress({ phase: "complete", progress: 100, message });
+      showAlert(message);
     } finally {
       setRevisionBusy(false);
     }
@@ -407,6 +416,7 @@ export function ToyBoxApp() {
             concepts={concepts}
             selectedConceptId={selectedConceptId}
             progress={conceptProgress}
+            revisionProgress={revisionProgress}
             busy={busy}
             revisionBusy={revisionBusy}
             revisionText={conceptRevisionText}
@@ -422,7 +432,7 @@ export function ToyBoxApp() {
           <DownloadPage run={readyRun} stlHref={stlDownloadHref} onNew={resetWorkspace} onBack={() => navigate("configure")} />
         </ProjectLayout>
       ) : route.name === "failed" ? (
-        <FailedPage run={run} onRetry={() => navigate("configure")} onBack={() => navigate("configure")} />
+        <FailedPage isLoading={busy && Boolean(route.runId) && run?.runId !== route.runId} run={run?.runId === route.runId || !route.runId ? run : null} onRetry={() => navigate("configure")} onBack={() => navigate("configure")} />
       ) : route.name === "missing" ? (
         <MissingRunPage runId={route.runId} onBack={() => navigate("configure")} />
       ) : isUtilityRoute(route.name) ? (
@@ -498,7 +508,7 @@ function Header({
     <header className="toybox-header">
       <div className="brand-row">
         <button className="brand-title" type="button" onClick={() => onNavigate("configure")}>
-          Lusie ai
+          Toy-Box 3D
         </button>
       </div>
       <div className="header-actions">
@@ -602,7 +612,7 @@ function ConfigPanel({
       <div className="panel-content">
         <div className="panel-title">
           <h2>先定模型方向</h2>
-          <p>选原型、尺寸、涂装和打印约束，生成更接近真实载具的概念图。</p>
+          <p>先描述要生成的模型，编号默认不启用；需要时可加入番号、字母或姓名等个性化信息。</p>
           <p className="tiny-label">
             openai:{handshake?.configured.openai ? "已连接" : "缺失"} · tripo:{handshake?.configured.tripo ? "已连接" : "缺失"}
           </p>
@@ -665,15 +675,16 @@ function ConfigPanel({
         </div>
 
         <div className="form-section">
-          <span className="section-label">风格 / 模型标志</span>
+          <span className="section-label">风格 / 个性化信息</span>
           <div className="field-row">
             <select className="select-input" aria-label="样式" value={input.style} onChange={(event) => onInput((current) => ({ ...current, style: event.target.value }))}>
               {stylesByCategory[input.category].map((style) => (
                 <option key={style}>{style}</option>
               ))}
             </select>
-            <input className="text-input" aria-label="模型标志文字" maxLength={24} placeholder="可选，例如 TONI ASIA" value={input.markingText ?? ""} onChange={(event) => onInput((current) => ({ ...current, markingText: event.target.value }))} />
+            <input className="text-input" aria-label="个性化信息" maxLength={24} placeholder="可选，番号、字母或姓名" value={input.markingText ?? ""} onChange={(event) => onInput((current) => ({ ...current, markingText: event.target.value }))} />
           </div>
+          <span className="tiny-label">默认留空，不会自动添加编号。</span>
         </div>
 
         <ColorPicker label="主色" value={input.primaryColor} ariaPrefix="主色" onSelect={(value) => onInput((current) => ({ ...current, primaryColor: value }))} />
@@ -702,16 +713,19 @@ function ConfigPanel({
 
 function ColorPicker({ label, value, ariaPrefix, onSelect }: { label: string; value: string; ariaPrefix: string; onSelect: (value: string) => void }) {
   return (
-    <div className="form-section">
+    <div className="form-section color-section">
       <span className="section-label">{label}</span>
       <div className="color-grid compact">
         {colors.map((color) => (
-          <button aria-label={`${ariaPrefix} ${color.name}`} className={value === color.value ? "swatch-button active" : "swatch-button"} key={color.value} type="button" onClick={() => onSelect(color.value)}>
+          <button aria-label={`${ariaPrefix} ${color.name}`} title={color.name} className={value === color.value ? "swatch-button active" : "swatch-button"} key={color.value} type="button" onClick={() => onSelect(color.value)}>
             <span className="swatch" style={{ backgroundColor: color.value }} />
-            {color.name}
           </button>
         ))}
       </div>
+      <label className="custom-color-field">
+        <span className="swatch custom-preview" style={{ backgroundColor: value }} />
+        <input aria-label={`${ariaPrefix} 自定义颜色`} type="color" value={value} onChange={(event) => onSelect(event.currentTarget.value)} />
+      </label>
     </div>
   );
 }
@@ -725,6 +739,41 @@ function ConceptProgressMeter({ progress }: { progress: ConceptProgressEvent }) 
       </div>
       <div className="concept-progress-track" role="progressbar" aria-label="概念图生成进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress.progress)}>
         <div style={{ width: `${progress.progress}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function RevisionProgressPanel({ progress, busy }: { progress: ConceptProgressEvent; busy: boolean }) {
+  const steps = [
+    { phase: "queued", label: "锁定原图", copy: "读取当前建模图和第一步固定输入。" },
+    { phase: "validating", label: "混合描述", copy: "将你的局部修改与模型参数合并。" },
+    { phase: "image", label: "重新生图", copy: "调用图片编辑接口，只改指定区域。" },
+    { phase: "complete", label: "更新产物", copy: "保存新确认图并切换为当前建模图。" }
+  ] as const;
+  const currentIndex = Math.max(0, steps.findIndex((step) => step.phase === progress.phase));
+
+  return (
+    <div className="revision-progress workspace-event" role="status" aria-live="polite">
+      <div className="revision-progress-head">
+        <span className="section-label">再确认进度</span>
+        <strong>{Math.round(progress.progress)}%</strong>
+      </div>
+      <div className="concept-progress-track" role="progressbar" aria-label="再确认生成进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress.progress)}>
+        <div style={{ width: `${progress.progress}%` }} />
+      </div>
+      <p>{progress.message}</p>
+      <div className="revision-steps" aria-label="再确认阶段">
+        {steps.map((step, index) => {
+          const state = index < currentIndex || (!busy && progress.phase === "complete" && index === currentIndex) ? "done" : index === currentIndex ? "active" : "pending";
+          return (
+            <div className={`revision-step ${state}`} key={step.phase}>
+              <span>{String(index + 1).padStart(2, "0")}</span>
+              <strong>{step.label}</strong>
+              <em>{step.copy}</em>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -772,6 +821,7 @@ function ConceptPage({
   concepts,
   selectedConceptId,
   progress,
+  revisionProgress,
   busy,
   revisionBusy,
   revisionText,
@@ -784,6 +834,7 @@ function ConceptPage({
   concepts: Concept[];
   selectedConceptId: string | null;
   progress: ConceptProgressEvent | null;
+  revisionProgress: ConceptProgressEvent | null;
   busy: boolean;
   revisionBusy: boolean;
   revisionText: string;
@@ -800,7 +851,7 @@ function ConceptPage({
       <div className="page-frame">
         <header className="page-title">
           <h1>确认建模输入图</h1>
-          <p>系统默认选中这张建模图。你也可以继续用一句话调整外形、颜色或局部结构。</p>
+          <p>系统默认选中这一张建模图。需要再确认时，可以用自然语言只修改局部，其余部分会尽量保持和第一张一致。</p>
         </header>
         {progress ? <ConceptProgressMeter progress={progress} /> : null}
         <section className="concept-grid" aria-label="概念图方案">
@@ -821,22 +872,23 @@ function ConceptPage({
             );
           })}
         </section>
-        <section className="concept-revision" aria-label="继续修改概念图">
+        <section className="concept-revision" aria-label="再确认">
           <div>
-            <span className="section-label">继续修改概念图</span>
-            <p>可以写“机颈再往上调 8 到 10 度”“把船锚展示出来”“调成绿色和白色”等。</p>
+            <span className="section-label">再确认</span>
+            <p>可以写“机翼调高 5 到 8 度”“为船只增加船锚”“在后方增加载机空间”等；系统会与第一步固定输入混合后重新生成一张。</p>
           </div>
           <textarea
             className="text-area"
-            aria-label="继续修改概念图"
+            aria-label="再确认修改描述"
             maxLength={260}
-            placeholder="写下想改的外形、颜色或局部细节。"
+            placeholder="写下想改的局部，未提到的部分会尽量保持不变。"
             value={revisionText}
             onChange={(event) => onRevisionText(event.target.value)}
           />
+          {revisionProgress ? <RevisionProgressPanel progress={revisionProgress} busy={revisionBusy} /> : null}
           <button className="button secondary" type="button" disabled={busy || revisionBusy || !selectedConcept} onClick={onRevise}>
             <Wand2 size={18} />
-            {revisionBusy ? "正在修改..." : "提交修改"}
+            {revisionBusy ? "正在重新生成..." : "重新生成确认图"}
           </button>
         </section>
         <div className="action-row">
@@ -1044,17 +1096,23 @@ function DownloadPage({ run, stlHref, onNew, onBack }: { run: ModelRun | null; s
   );
 }
 
-function FailedPage({ run, onRetry, onBack }: { run: ModelRun | null; onRetry: () => void; onBack: () => void }) {
-  const reasons = run?.reasons.length ? run.reasons : ["模型生成失败，后端未返回更详细的错误。"];
+function FailedPage({ run, isLoading = false, onRetry, onBack }: { run: ModelRun | null; isLoading?: boolean; onRetry: () => void; onBack: () => void }) {
+  const reasons = isLoading ? [] : run?.reasons ?? ["模型生成失败，后端未返回更详细的错误。"];
+  const failure = summarizeModelFailure(reasons);
   return (
     <main className="failed-page">
       <section className="failure-card">
         <div className="failure-icon">
           <AlertTriangle size={34} />
         </div>
-        <h1>这次没有生成成功</h1>
-        <p>先看原因，再回到参数页减少细节或调整外形。</p>
-        <pre className="error-log">{reasons.map((reason, index) => `[${index + 1}] ${reason}`).join("\n")}</pre>
+        <h1>{failure.title}</h1>
+        <p>{failure.action}</p>
+        {reasons.length ? (
+          <>
+            <span className="section-label">原始错误</span>
+            <pre className="error-log">{reasons.map((reason, index) => `[${index + 1}] ${reason}`).join("\n")}</pre>
+          </>
+        ) : null}
         <div className="action-row">
           <button className="button secondary" type="button" onClick={onRetry}>
             调整参数重试
