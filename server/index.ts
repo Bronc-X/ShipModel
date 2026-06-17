@@ -272,10 +272,10 @@ async function runModelGeneration(body: GenerateModelRequest, emit?: (event: Mod
     const stlFile = await generateTripoModel(run, async (event) => {
       await send({ ...event, jobId, at: at() });
     });
-    await send({ type: "tool.completed", jobId, callId: "tripo_generate_model", name: "tripo_image_to_model", outputSummary: stlFile, at: at() });
+    await send({ type: "tool.completed", jobId, callId: "tripo_generate_model", name: "tripo_image_to_model", outputSummary: stlFile.fileName, at: at() });
 
-    await send({ type: "tool.started", jobId, callId: "validate_stl", name: "validate_stl", inputSummary: stlFile, at: at() });
-    const reasons = await validateStl(run.runId, stlFile);
+    await send({ type: "tool.started", jobId, callId: "validate_stl", name: "validate_stl", inputSummary: stlFile.fileName, at: at() });
+    const reasons = await validateStl(run.runId, stlFile.fileName);
 
     if (reasons.length > 0) {
       run.status = "Failed";
@@ -286,7 +286,8 @@ async function runModelGeneration(body: GenerateModelRequest, emit?: (event: Mod
       run.status = "Ready";
       run.reasons = [];
       run.files = {
-        stl: publicRunFile(run.runId, stlFile)
+        stl: publicRunFile(run.runId, stlFile.fileName),
+        stlSourceUrl: stlFile.sourceUrl
       };
       await send({ type: "tool.completed", jobId, callId: "validate_stl", name: "validate_stl", outputSummary: "STL 文件通过基础校验", at: at() });
       await send({
@@ -323,17 +324,56 @@ app.get("/api/runs/:runId", async (request, response) => {
 });
 
 app.get("/api/runs/:runId/download/stl", async (request, response) => {
+  const sourceUrl = getAllowedSourceUrl(String(request.query.source ?? ""));
   try {
     const run = await loadRun(request.params.runId);
     if (run.status !== "Ready" || !run.files.stl) {
       response.status(404).json({ error: "STL is not ready" });
       return;
     }
+    if (sourceUrl) {
+      await pipeRemoteStl(sourceUrl, run.runId, response);
+      return;
+    }
     response.download(path.join(getRunDir(run.runId), path.basename(run.files.stl)), `${run.runId}.stl`);
   } catch {
+    if (sourceUrl) {
+      await pipeRemoteStl(sourceUrl, request.params.runId, response);
+      return;
+    }
     response.status(404).json({ error: "Run not found" });
   }
 });
+
+function getAllowedSourceUrl(source: string) {
+  if (!source) return null;
+
+  try {
+    const url = new URL(source);
+    if (url.protocol !== "https:") return null;
+    const host = url.hostname.toLowerCase();
+    if (!host.endsWith(".tripo3d.com") && !host.endsWith(".tripo3d.ai")) return null;
+    if (!url.pathname.toLowerCase().endsWith(".stl")) return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+async function pipeRemoteStl(sourceUrl: string, runId: string, response: express.Response) {
+  const remoteResponse = await fetch(sourceUrl);
+  if (!remoteResponse.ok || !remoteResponse.body) {
+    response.status(502).json({ error: `Remote STL fetch failed: ${remoteResponse.status}` });
+    return;
+  }
+
+  response.setHeader("Access-Control-Allow-Origin", "*");
+  response.setHeader("Cache-Control", "private, max-age=3600");
+  response.setHeader("Content-Disposition", `attachment; filename="${runId}.stl"`);
+  response.setHeader("Content-Type", "model/stl");
+  const bytes = Buffer.from(await remoteResponse.arrayBuffer());
+  response.send(bytes);
+}
 
 app.listen(port, () => {
   process.stdout.write(`Printable model API listening on http://localhost:${port}\n`);

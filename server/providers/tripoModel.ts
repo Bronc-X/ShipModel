@@ -40,6 +40,10 @@ export type TripoModelProgressEvent =
   | { type: "tool.completed"; callId: string; name: string; outputSummary?: string };
 
 type TripoModelProgress = (event: TripoModelProgressEvent) => Promise<void> | void;
+type GeneratedTripoModelFile = {
+  fileName: string;
+  sourceUrl: string;
+};
 
 const defaultBaseUrl = "https://api.tripo3d.ai/v2/openapi";
 const tripoProxyUrl = resolveTripoProxyUrl(process.env);
@@ -147,9 +151,12 @@ async function convertTripoModel(baseUrl: string, apiKey: string, originalTaskId
   }
 
   await emitProgress(emit, { type: "tool.started", callId: "tripo_download_stl", name: "tripo_download_stl", inputSummary: "STL asset" });
-  const stlFile = await downloadModel(stlUrl, runId, "model.stl");
-  await emitProgress(emit, { type: "tool.completed", callId: "tripo_download_stl", name: "tripo_download_stl", outputSummary: stlFile });
-  return stlFile;
+  const fileName = await downloadModel(stlUrl, runId, "model.stl");
+  await emitProgress(emit, { type: "tool.completed", callId: "tripo_download_stl", name: "tripo_download_stl", outputSummary: fileName });
+  return {
+    fileName,
+    sourceUrl: stlUrl
+  } satisfies GeneratedTripoModelFile;
 }
 
 async function pollTripoTask(baseUrl: string, apiKey: string, taskId: string, callId: string, name: string, options: ReturnType<typeof getTripoOptions>, emit?: TripoModelProgress): Promise<TripoTaskStatus> {

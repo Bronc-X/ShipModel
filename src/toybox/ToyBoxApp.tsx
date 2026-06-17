@@ -26,7 +26,7 @@ import {
   Users,
   Wand2
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { generateConcepts, generateModel, getHandshake, getRun, reviseConcept } from "../api";
 import { ModelViewer } from "../components/ModelViewer";
 import type { Concept, ConceptProgressEvent, HandshakeResponse, ModelCategory, ModelJobEvent, ModelRequest, ModelRun, ModelSubtype } from "../types";
@@ -98,6 +98,7 @@ export function ToyBoxApp() {
   const [previewMode, setPreviewMode] = useState<PreviewMode>("applied");
   const [historyEntries, setHistoryEntries] = useState<LocalHistoryEntry[]>(() => getHistoryEntries());
   const [membership, setMembershipState] = useState<MembershipSnapshot>(() => getMembership());
+  const historyRecoveryRunIds = useRef<Set<string>>(new Set());
 
   const activeCategory = useMemo(() => categories.find((category) => category.id === input.category) ?? categories[0], [input.category]);
   const activePreview = conceptPreviewAssets[input.subtype];
@@ -159,6 +160,43 @@ export function ToyBoxApp() {
       cancelled = true;
     };
   }, [route.name, route.runId, run]);
+
+  useEffect(() => {
+    const recoverableEntries = historyEntries.filter((entry) => {
+      if (entry.status !== "ready" || !entry.runId || entry.files.stlSourceUrl) return false;
+      return !historyRecoveryRunIds.current.has(entry.runId);
+    });
+    if (!recoverableEntries.length) return;
+
+    let cancelled = false;
+    recoverableEntries.forEach((entry) => historyRecoveryRunIds.current.add(entry.runId ?? ""));
+
+    Promise.all(recoverableEntries.map(async (entry) => {
+      if (!entry.runId) return null;
+      try {
+        const { run: restoredRun } = await getRun(entry.runId);
+        if (!restoredRun.files.stlSourceUrl) return null;
+        return saveHistory({
+          input: restoredRun.input,
+          runId: restoredRun.runId,
+          concepts: restoredRun.concepts,
+          selectedConceptId: restoredRun.selectedConceptId ?? null,
+          status: entryFromRunStatus(restoredRun.status),
+          files: restoredRun.files
+        });
+      } catch {
+        return null;
+      }
+    })).then((restoredEntries) => {
+      if (!cancelled && restoredEntries.some(Boolean)) {
+        setHistoryEntries(getHistoryEntries());
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [historyEntries]);
 
   function showToast(message: string, tone: ToastTone = "info") {
     setToast({ message, tone });
@@ -1381,11 +1419,16 @@ function ColorValue({ value }: { value: string }) {
 }
 
 function getHistoryStlHref(entry: LocalHistoryEntry) {
-  if (entry.files.stl) return entry.files.stl;
+  if (entry.files.stl) return withStlSource(entry.files.stl, entry.files.stlSourceUrl);
   if (entry.status === "ready" && entry.runId) {
-    return `/api/runs/${encodeURIComponent(entry.runId)}/download/stl`;
+    return withStlSource(`/api/runs/${encodeURIComponent(entry.runId)}/download/stl`, entry.files.stlSourceUrl);
   }
   return "";
+}
+
+function withStlSource(href: string, sourceUrl?: string) {
+  if (!sourceUrl) return href;
+  return `${href}${href.includes("?") ? "&" : "?"}source=${encodeURIComponent(sourceUrl)}`;
 }
 
 function StoragePage({

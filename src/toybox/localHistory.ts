@@ -26,6 +26,7 @@ export interface LocalHistoryEntry {
   previewImageUrl: string | null;
   files: {
     stl?: string;
+    stlSourceUrl?: string;
     threeMf?: string;
   };
 }
@@ -175,6 +176,7 @@ function toStoredHistoryEntry(entry: LocalHistoryEntry): LocalHistoryEntry {
 function sanitizeFiles(files: LocalHistoryEntry["files"]): LocalHistoryEntry["files"] {
   const nextFiles: LocalHistoryEntry["files"] = {};
   if (typeof files.stl === "string") nextFiles.stl = files.stl;
+  if (typeof files.stlSourceUrl === "string") nextFiles.stlSourceUrl = files.stlSourceUrl;
   if (typeof files.threeMf === "string") nextFiles.threeMf = files.threeMf;
   return nextFiles;
 }
