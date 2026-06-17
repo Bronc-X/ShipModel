@@ -89,6 +89,48 @@ describe("toybox local history", () => {
     assert.equal(entries[0].updatedAt, "2026-05-12T08:02:00.000Z");
   });
 
+  it("keeps STL file metadata when a ready run is saved and reloaded", () => {
+    const store = new MemoryStore();
+
+    appendHistoryEntry(
+      store,
+      {
+        input,
+        runId: "run-1",
+        concepts,
+        selectedConceptId: "concept-a",
+        status: "ready",
+        files: { stl: "/api/runs/run-1/download/stl" }
+      },
+      "2026-05-12T08:02:00.000Z"
+    );
+
+    const entries = getHistoryEntries(store);
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].files.stl, "/api/runs/run-1/download/stl");
+  });
+
+  it("normalizes older history entries that do not have file metadata", () => {
+    const store = new MemoryStore();
+    const legacyEntry = {
+      id: "legacy-run",
+      input,
+      runId: "legacy-run",
+      concepts: [],
+      selectedConceptId: null,
+      status: "ready",
+      createdAt: "2026-05-12T08:00:00.000Z",
+      updatedAt: "2026-05-12T08:00:00.000Z",
+      title: "legacy",
+      label: "TONI",
+      previewImageUrl: null
+    };
+    store.setItem("toybox:history", JSON.stringify([legacyEntry]));
+
+    const entries = getHistoryEntries(store);
+    assert.deepEqual(entries[0].files, {});
+  });
+
   it("stores lightweight snapshots when concept images are large data URLs", () => {
     const store = new MemoryStore();
     const largeConcepts: Concept[] = [

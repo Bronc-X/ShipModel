@@ -24,6 +24,10 @@ export interface LocalHistoryEntry {
   title: string;
   label: string;
   previewImageUrl: string | null;
+  files: {
+    stl?: string;
+    threeMf?: string;
+  };
 }
 
 export interface HistoryEntryInput {
@@ -32,6 +36,7 @@ export interface HistoryEntryInput {
   concepts?: Concept[];
   selectedConceptId?: string | null;
   status: LocalHistoryStatus;
+  files?: LocalHistoryEntry["files"];
 }
 
 export interface MembershipSnapshot {
@@ -50,7 +55,7 @@ export function getHistoryEntries(store: LocalHistoryStore = window.localStorage
   try {
     const parsed = JSON.parse(raw) as LocalHistoryEntry[];
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(isHistoryEntry).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return parsed.filter(isHistoryEntry).map(toStoredHistoryEntry).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   } catch {
     return [];
   }
@@ -76,7 +81,8 @@ export function appendHistoryEntry(
     updatedAt: now,
     title: buildHistoryTitle(entryInput.input),
     label: buildHistoryLabel(entryInput.input),
-    previewImageUrl: toStoredPreview(entryInput.concepts?.[0]?.imageUrl ?? previous?.previewImageUrl ?? null)
+    previewImageUrl: toStoredPreview(entryInput.concepts?.[0]?.imageUrl ?? previous?.previewImageUrl ?? null),
+    files: sanitizeFiles(entryInput.files ?? previous?.files ?? {})
   };
 
   const nextEntries = existingIndex >= 0
@@ -161,8 +167,16 @@ function toStoredHistoryEntry(entry: LocalHistoryEntry): LocalHistoryEntry {
   return {
     ...entry,
     concepts: sanitizeConcepts(entry.concepts),
-    previewImageUrl: toStoredPreview(entry.previewImageUrl)
+    previewImageUrl: toStoredPreview(entry.previewImageUrl),
+    files: sanitizeFiles(entry.files ?? {})
   };
+}
+
+function sanitizeFiles(files: LocalHistoryEntry["files"]): LocalHistoryEntry["files"] {
+  const nextFiles: LocalHistoryEntry["files"] = {};
+  if (typeof files.stl === "string") nextFiles.stl = files.stl;
+  if (typeof files.threeMf === "string") nextFiles.threeMf = files.threeMf;
+  return nextFiles;
 }
 
 function safeSetHistory(store: LocalHistoryStore, entries: LocalHistoryEntry[]) {

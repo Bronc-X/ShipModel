@@ -281,7 +281,8 @@ export function ToyBoxApp() {
         runId: response.run.runId,
         concepts: response.run.concepts,
         selectedConceptId: response.run.selectedConceptId ?? null,
-        status: entryFromRunStatus(response.run.status)
+        status: entryFromRunStatus(response.run.status),
+        files: response.run.files
       });
       navigate(response.run.status === "Ready" ? "download" : "failed", true, response.run.runId);
     } catch (error) {
@@ -318,7 +319,8 @@ export function ToyBoxApp() {
         runId: response.run.runId,
         concepts: response.run.concepts,
         selectedConceptId: response.concept.id,
-        status: "concept"
+        status: "concept",
+        files: response.run.files
       });
       showToast("概念图已按你的描述更新。");
       setRevisionProgress({ phase: "complete", progress: 100, message: "再确认图已更新，可继续生成 STL。" });
@@ -379,7 +381,8 @@ export function ToyBoxApp() {
       runId,
       concepts,
       selectedConceptId,
-      status: readyRun ? "ready" : concepts.length ? "concept" : "saved"
+      status: readyRun ? "ready" : concepts.length ? "concept" : "saved",
+      files: readyRun?.files
     });
     navigate("files");
     showToast("当前配置已保存到此浏览器。");
@@ -1199,46 +1202,150 @@ function HistoryPage({ entries, onBack }: { entries: LocalHistoryEntry[]; onBack
         </div>
         <div>
           <span className="section-label">Local history</span>
-          <h1>本地历史</h1>
-          <p>每次生成概念图、生成 STL 或手动保存，都会追加到当前浏览器的历史记录里。</p>
+          <h1>生成后台清单</h1>
+          <p>每一次生成都会保存时间、参数、概念预览、成品 3D 查看入口和 STL 文件入口，方便回头找旧版本。</p>
         </div>
         <div className="history-summary">
           <Spec icon={<Database size={18} />} label="本地快照" value={`${entries.length} 条`} />
           <Spec icon={<Clock size={18} />} label="最近更新" value={latest ? formatLocalTime(latest.updatedAt) : "暂无"} />
-          <Spec icon={<ShieldCheck size={18} />} label="保存策略" value="本地优先" />
+          <Spec icon={<FileDown size={18} />} label="可下载 STL" value={`${entries.filter((entry) => getHistoryStlHref(entry)).length} 个`} />
         </div>
         {entries.length ? (
           <div className="history-list" aria-label="本地生成历史">
             {entries.map((entry) => (
-              <article className="history-card" key={entry.id}>
-                <div className="history-thumb">{entry.previewImageUrl ? <img alt="" src={entry.previewImageUrl} /> : <Box size={22} />}</div>
-                <div>
-                  <div className="history-card-head">
-                    <strong>{entry.title}</strong>
-                    <span>{historyStatusLabel(entry.status)}</span>
-                  </div>
-                  <p>{entry.input.description}</p>
-                  <div className="history-meta">
-                    <span>{entry.label}</span>
-                    <span>{entry.input.targetLengthMm} mm</span>
-                    <span>{entry.runId ?? "local-only"}</span>
-                    <span>{formatLocalTime(entry.updatedAt)}</span>
-                  </div>
-                </div>
-              </article>
+              <HistoryRecordCard entry={entry} key={entry.id} />
             ))}
           </div>
         ) : (
           <div className="empty-state">
             <Clock size={24} />
             <strong>暂无生成历史</strong>
-            <span>生成概念图或点击保存配置后，这里会出现第一条记录。</span>
+            <span>生成概念图、STL 或点击保存配置后，这里会出现第一条记录。</span>
           </div>
         )}
         <BackRow onBack={onBack} />
       </section>
     </main>
   );
+}
+
+function HistoryRecordCard({ entry }: { entry: LocalHistoryEntry }) {
+  const stlHref = getHistoryStlHref(entry);
+  const dimensions = getModelDimensions(entry.input.targetLengthMm);
+  const selectedConcept = entry.concepts.find((concept) => concept.id === entry.selectedConceptId) ?? entry.concepts[0];
+
+  return (
+    <article className="history-record-card">
+      <header className="history-record-head">
+        <div>
+          <span className="section-label">{formatLocalTime(entry.createdAt)}</span>
+          <h2>{entry.title}</h2>
+        </div>
+        <span className={`history-status-chip ${entry.status}`}>{historyStatusLabel(entry.status)}</span>
+      </header>
+      <div className="history-record-grid">
+        <section className="history-media-panel" aria-label="生成预览图">
+          <span className="history-panel-title">预览图</span>
+          <div className="history-preview-frame">
+            {entry.previewImageUrl ? <img alt={selectedConcept?.title ?? entry.title} src={entry.previewImageUrl} /> : <Box size={24} />}
+          </div>
+          <p>{selectedConcept?.title ?? "概念预览已记录"}</p>
+        </section>
+        <section className="history-media-panel" aria-label="最终 3D 效果图">
+          <span className="history-panel-title">3D 效果</span>
+          <div className="history-model-frame">
+            {stlHref ? (
+              <ModelViewer
+                category={entry.input.category}
+                primaryColor={entry.input.primaryColor}
+                accentColor={entry.input.accentColor}
+                status="Ready"
+                stlUrl={stlHref}
+                dimensions={dimensions}
+              />
+            ) : (
+              <ModelViewer
+                category={entry.input.category}
+                primaryColor={entry.input.primaryColor}
+                accentColor={entry.input.accentColor}
+                dimensions={dimensions}
+                pending
+              />
+            )}
+          </div>
+        </section>
+        <section className="history-detail-panel" aria-label="参数配置">
+          <span className="history-panel-title">参数配置</span>
+          <dl className="history-param-grid">
+            <div>
+              <dt>类别</dt>
+              <dd>{entry.input.category}</dd>
+            </div>
+            <div>
+              <dt>原型</dt>
+              <dd>{entry.input.subtype}</dd>
+            </div>
+            <div>
+              <dt>风格</dt>
+              <dd>{entry.input.style}</dd>
+            </div>
+            <div>
+              <dt>尺寸</dt>
+              <dd>{`${dimensions.length} x ${dimensions.width} x ${dimensions.height} mm`}</dd>
+            </div>
+            <div>
+              <dt>主色</dt>
+              <dd><ColorValue value={entry.input.primaryColor} /></dd>
+            </div>
+            <div>
+              <dt>辅色</dt>
+              <dd><ColorValue value={entry.input.accentColor} /></dd>
+            </div>
+            <div>
+              <dt>标志</dt>
+              <dd>{entry.label}</dd>
+            </div>
+            <div>
+              <dt>runId</dt>
+              <dd>{entry.runId ?? "local-only"}</dd>
+            </div>
+          </dl>
+          <p>{entry.input.description}</p>
+          <div className="history-file-row">
+            {stlHref ? (
+              <a className="button primary" href={stlHref}>
+                <Download size={17} />
+                下载 STL
+              </a>
+            ) : (
+              <button className="button secondary" type="button" disabled>
+                <FileDown size={17} />
+                STL 未就绪
+              </button>
+            )}
+            <span>{formatLocalTime(entry.updatedAt)} 更新</span>
+          </div>
+        </section>
+      </div>
+    </article>
+  );
+}
+
+function ColorValue({ value }: { value: string }) {
+  return (
+    <span className="history-color-value">
+      <i style={{ backgroundColor: value }} />
+      {value}
+    </span>
+  );
+}
+
+function getHistoryStlHref(entry: LocalHistoryEntry) {
+  if (entry.files.stl) return entry.files.stl;
+  if (entry.status === "ready" && entry.runId) {
+    return `/api/runs/${encodeURIComponent(entry.runId)}/download/stl`;
+  }
+  return "";
 }
 
 function StoragePage({
