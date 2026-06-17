@@ -324,7 +324,15 @@ app.get("/api/runs/:runId", async (request, response) => {
 });
 
 app.get("/api/history", async (_request, response) => {
-  response.json({ runs: await listRuns() });
+  const runs = await listRuns();
+  response.json({
+    diagnostics: {
+      diskCount: runs.length,
+      supabaseConfigured: false,
+      supabaseCount: 0
+    },
+    runs
+  });
 });
 
 app.get("/api/runs/:runId/download/stl", async (request, response) => {

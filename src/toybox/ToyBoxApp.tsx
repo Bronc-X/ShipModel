@@ -119,10 +119,11 @@ export function ToyBoxApp() {
     getHistoryRuns()
       .then(({ runs }) => {
         if (cancelled) return;
-        setHistoryEntries(mergeHistoryEntries(runs.map(historyEntryFromRun), getHistoryEntries()));
+        const localEntries = getHistoryEntries();
+        setHistoryEntries(runs.length ? mergeHistoryEntries(runs.map(historyEntryFromRun), localEntries) : filterDeliverableHistoryEntries(localEntries));
       })
       .catch(() => {
-        if (!cancelled) setHistoryEntries(filterRecoverableLocalHistory(getHistoryEntries()));
+        if (!cancelled) setHistoryEntries(filterDeliverableHistoryEntries(getHistoryEntries()));
       });
 
     return () => {
@@ -180,7 +181,7 @@ export function ToyBoxApp() {
 
   useEffect(() => {
     const recoverableEntries = historyEntries.filter((entry) => {
-      if (entry.status !== "ready" || !entry.runId || entry.files.stlSourceUrl) return false;
+      if (entry.status !== "ready" || !entry.runId || entry.files.stlSourceUrl || entry.files.stlPersisted) return false;
       return !historyRecoveryRunIds.current.has(entry.runId);
     });
     if (!recoverableEntries.length) return;
@@ -192,7 +193,7 @@ export function ToyBoxApp() {
       if (!entry.runId) return null;
       try {
         const { run: restoredRun } = await getRun(entry.runId);
-        if (!restoredRun.files.stlSourceUrl) return null;
+        if (!hasRecoverableStl(restoredRun.files)) return null;
         return saveHistory({
           input: restoredRun.input,
           runId: restoredRun.runId,
@@ -210,7 +211,7 @@ export function ToyBoxApp() {
         if (restored.length) {
           setHistoryEntries(mergeHistoryEntries(restored, getHistoryEntries()));
         } else {
-          setHistoryEntries(filterRecoverableLocalHistory(getHistoryEntries()));
+          setHistoryEntries(filterDeliverableHistoryEntries(getHistoryEntries()));
         }
       }
     });
@@ -1455,18 +1456,25 @@ function withStlSource(href: string, sourceUrl?: string) {
 
 function mergeHistoryEntries(primary: LocalHistoryEntry[], secondary: LocalHistoryEntry[]) {
   const byId = new Map<string, LocalHistoryEntry>();
-  for (const entry of [...primary, ...filterRecoverableLocalHistory(secondary)]) {
+  for (const entry of [...primary, ...filterDeliverableHistoryEntries(secondary)]) {
     const key = entry.runId ?? entry.id;
     if (!byId.has(key)) byId.set(key, entry);
   }
-  return Array.from(byId.values()).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  return Array.from(byId.values())
+    .filter(isDeliverableHistoryEntry)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
-function filterRecoverableLocalHistory(entries: LocalHistoryEntry[]) {
-  return entries.filter((entry) => {
-    if (entry.status !== "ready") return true;
-    return Boolean(entry.files.stlSourceUrl);
-  });
+function filterDeliverableHistoryEntries(entries: LocalHistoryEntry[]) {
+  return entries.filter(isDeliverableHistoryEntry);
+}
+
+function isDeliverableHistoryEntry(entry: LocalHistoryEntry) {
+  return entry.status === "ready" && Boolean(entry.runId && hasRecoverableStl(entry.files));
+}
+
+function hasRecoverableStl(files: LocalHistoryEntry["files"]) {
+  return Boolean(files.stl && (files.stlSourceUrl || files.stlPersisted));
 }
 
 function StoragePage({

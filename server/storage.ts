@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Concept, ModelRun } from "./types.js";
@@ -34,7 +34,10 @@ export async function listRuns(limit = 30): Promise<ModelRun[]> {
     const entries = await readdir(runsDir, { withFileTypes: true });
     const runs = await Promise.all(entries
       .filter((entry) => entry.isDirectory())
-      .map((entry) => loadRun(entry.name).catch(() => null)));
+      .map(async (entry) => {
+        const run = await loadRun(entry.name).catch(() => null);
+        return run ? markPersistedStl(run) : null;
+      }));
     return runs
       .filter((run): run is ModelRun => Boolean(run))
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
@@ -42,6 +45,28 @@ export async function listRuns(limit = 30): Promise<ModelRun[]> {
   } catch {
     return [];
   }
+}
+
+async function markPersistedStl(run: ModelRun): Promise<ModelRun> {
+  if (run.status !== "Ready" || !run.files.stl) return run;
+  if (run.files.stlSourceUrl || run.files.stlPersisted) return run;
+
+  const fileName = path.basename(run.files.stl);
+  try {
+    const stlStats = await stat(path.join(getRunDir(run.runId), fileName));
+    if (stlStats.size >= 256) {
+      return {
+        ...run,
+        files: {
+          ...run.files,
+          stlPersisted: true
+        }
+      };
+    }
+  } catch {
+  }
+
+  return run;
 }
 
 export function publicRunFile(runId: string, fileName: string) {

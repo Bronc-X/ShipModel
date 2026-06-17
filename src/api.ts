@@ -186,7 +186,15 @@ export async function getHistoryRuns() {
     throw new Error(await getErrorMessage(response));
   }
 
-  return (await response.json()) as { runs: ModelRun[] };
+  return (await response.json()) as {
+    diagnostics?: {
+      diskCount: number;
+      supabaseConfigured: boolean;
+      supabaseCount: number;
+      supabaseError?: string;
+    };
+    runs: ModelRun[];
+  };
 }
 
 async function getErrorMessage(response: Response) {
