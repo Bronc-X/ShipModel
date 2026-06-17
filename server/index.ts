@@ -3,7 +3,7 @@ import cors from "cors";
 import express from "express";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { ensureRunDir, getRunDir, loadRun, publicRunFile, runsDir, saveRun } from "./storage.js";
+import { ensureRunDir, getRunDir, loadRun, persistConceptImages, publicRunFile, runsDir, saveRun } from "./storage.js";
 import type { ConceptProgressEvent, ConceptResponse, GenerateModelRequest, GenerateModelResponse, HandshakeResponse, ModelJobEvent, ModelRequest, ModelRun, ReviseConceptRequest, ReviseConceptResponse } from "./types.js";
 import { openAiConcepts, reviseOpenAiConcept } from "./providers/openaiImages.js";
 import { generateTripoModel } from "./providers/tripoModel.js";
@@ -74,7 +74,8 @@ app.post("/api/concepts", async (request, response) => {
       return;
     }
 
-    const concepts = await openAiConcepts(input, runId);
+    const generatedConcepts = await openAiConcepts(input, runId);
+    const concepts = await persistConceptImages(runId, generatedConcepts);
     const now = new Date().toISOString();
     const run: ModelRun = {
       runId,
@@ -129,13 +130,14 @@ async function streamConceptProgress(input: ModelRequest, response: express.Resp
       return;
     }
 
-    const concepts = await openAiConcepts(input, runId, {
+    const generatedConcepts = await openAiConcepts(input, runId, {
       onConceptDone: (_concept, index, total) => {
         const progress = index < total ? 56 : 84;
         const nextMessage = "概念图已完成，正在保存结果。";
         send({ phase: "image", progress, message: nextMessage, runId, conceptIndex: index, totalConcepts: total });
       }
     });
+    const concepts = await persistConceptImages(runId, generatedConcepts);
 
     send({ phase: "saving", progress: 92, message: "正在保存概念图和生成记录。", runId, totalConcepts: concepts.length });
 
@@ -182,12 +184,14 @@ app.post("/api/concepts/revise", async (request, response) => {
     }
 
     const revised = await reviseOpenAiConcept(run.input, concept, body.instruction);
-    run.concepts = [revised, ...run.concepts.filter((item) => item.id !== concept.id)];
-    run.selectedConceptId = revised.id;
+    const [persistedConcept] = await persistConceptImages(run.runId, [revised]);
+    const nextConcept = persistedConcept ?? revised;
+    run.concepts = [nextConcept, ...run.concepts.filter((item) => item.id !== concept.id)];
+    run.selectedConceptId = nextConcept.id;
     run.updatedAt = new Date().toISOString();
     await saveRun(run);
 
-    const payload: ReviseConceptResponse = { run, concept: revised };
+    const payload: ReviseConceptResponse = { run, concept: nextConcept };
     response.json(payload);
   } catch (error) {
     response.status(500).json({

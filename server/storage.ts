@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ModelRun } from "./types.js";
+import type { Concept, ModelRun } from "./types.js";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const runsDir = path.join(rootDir, "runs");
@@ -31,4 +31,35 @@ export async function loadRun(runId: string): Promise<ModelRun> {
 
 export function publicRunFile(runId: string, fileName: string) {
   return `/runs/${runId}/${fileName}`;
+}
+
+export async function persistConceptImages(runId: string, concepts: Concept[], rootDir = runsDir) {
+  await mkdir(path.join(rootDir, runId), { recursive: true });
+
+  return Promise.all(
+    concepts.map(async (concept, index): Promise<Concept> => {
+      const image = parseDataImage(concept.imageUrl);
+      if (!image) return concept;
+
+      const fileName = `concept-${index + 1}.${image.extension}`;
+      await writeFile(path.join(rootDir, runId, fileName), image.bytes);
+
+      return {
+        ...concept,
+        imageDataUrl: concept.imageUrl,
+        imageUrl: publicRunFile(runId, fileName)
+      };
+    })
+  );
+}
+
+function parseDataImage(imageUrl: string) {
+  const match = imageUrl.match(/^data:image\/([a-zA-Z0-9.+-]+);base64,(.+)$/);
+  if (!match) return null;
+
+  const mimeSubtype = match[1].toLowerCase();
+  return {
+    bytes: Buffer.from(match[2], "base64"),
+    extension: mimeSubtype === "jpeg" ? "jpg" : mimeSubtype
+  };
 }

@@ -24,6 +24,7 @@ try {
     "tests/concept-generation-policy.test.ts",
     "tests/prompt-policy.test.ts",
     "tests/model-progress.test.ts",
+    "tests/concept-image-persistence.test.ts",
     "tests/tripo-performance.test.ts"
   ]);
 
