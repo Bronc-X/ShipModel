@@ -1231,7 +1231,7 @@ function HistoryPage({ entries, onBack }: { entries: LocalHistoryEntry[]; onBack
 
 function HistoryRecordCard({ entry }: { entry: LocalHistoryEntry }) {
   const stlHref = getHistoryStlHref(entry);
-  const dimensions = getModelDimensions(entry.input.targetLengthMm);
+  const dimensions = useMemo(() => getModelDimensions(entry.input.targetLengthMm), [entry.input.targetLengthMm]);
   const inspection = getInspectionProfile(entry.input.category, dimensions);
   const selectedConcept = entry.concepts.find((concept) => concept.id === entry.selectedConceptId) ?? entry.concepts[0];
   const [stlLoadFailed, setStlLoadFailed] = useState(false);
