@@ -179,6 +179,16 @@ export async function getRun(runId: string) {
   return (await response.json()) as { run: ModelRun };
 }
 
+export async function getHistoryRuns() {
+  const response = await fetch("/api/history");
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response));
+  }
+
+  return (await response.json()) as { runs: ModelRun[] };
+}
+
 async function getErrorMessage(response: Response) {
   try {
     const json = (await response.json()) as { message?: string; error?: string; reasons?: string[] };

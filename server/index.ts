@@ -3,7 +3,7 @@ import cors from "cors";
 import express from "express";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { ensureRunDir, getRunDir, loadRun, persistConceptImages, publicRunFile, runsDir, saveRun } from "./storage.js";
+import { ensureRunDir, getRunDir, listRuns, loadRun, persistConceptImages, publicRunFile, runsDir, saveRun } from "./storage.js";
 import type { ConceptProgressEvent, ConceptResponse, GenerateModelRequest, GenerateModelResponse, HandshakeResponse, ModelJobEvent, ModelRequest, ModelRun, ReviseConceptRequest, ReviseConceptResponse } from "./types.js";
 import { openAiConcepts, reviseOpenAiConcept } from "./providers/openaiImages.js";
 import { generateTripoModel } from "./providers/tripoModel.js";
@@ -321,6 +321,10 @@ app.get("/api/runs/:runId", async (request, response) => {
   } catch {
     response.status(404).json({ error: "Run not found" });
   }
+});
+
+app.get("/api/history", async (_request, response) => {
+  response.json({ runs: await listRuns() });
 });
 
 app.get("/api/runs/:runId/download/stl", async (request, response) => {

@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Concept, ModelRun } from "./types.js";
@@ -27,6 +27,21 @@ export async function saveRun(run: ModelRun) {
 export async function loadRun(runId: string): Promise<ModelRun> {
   const raw = await readFile(getRunFile(runId), "utf8");
   return JSON.parse(raw) as ModelRun;
+}
+
+export async function listRuns(limit = 30): Promise<ModelRun[]> {
+  try {
+    const entries = await readdir(runsDir, { withFileTypes: true });
+    const runs = await Promise.all(entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => loadRun(entry.name).catch(() => null)));
+    return runs
+      .filter((run): run is ModelRun => Boolean(run))
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .slice(0, limit);
+  } catch {
+    return [];
+  }
 }
 
 export function publicRunFile(runId: string, fileName: string) {

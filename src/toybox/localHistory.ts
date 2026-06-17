@@ -173,6 +173,32 @@ function toStoredHistoryEntry(entry: LocalHistoryEntry): LocalHistoryEntry {
   };
 }
 
+export function historyEntryFromRun(run: {
+  runId: string;
+  input: ModelRequest;
+  concepts: Concept[];
+  selectedConceptId?: string;
+  status?: RunStatus;
+  files: LocalHistoryEntry["files"];
+  createdAt: string;
+  updatedAt: string;
+}): LocalHistoryEntry {
+  return toStoredHistoryEntry({
+    id: run.runId,
+    input: run.input,
+    runId: run.runId,
+    concepts: run.concepts,
+    selectedConceptId: run.selectedConceptId ?? run.concepts[0]?.id ?? null,
+    status: entryFromRunStatus(run.status),
+    createdAt: run.createdAt,
+    updatedAt: run.updatedAt,
+    title: buildHistoryTitle(run.input),
+    label: buildHistoryLabel(run.input),
+    previewImageUrl: run.concepts[0]?.imageUrl ?? null,
+    files: run.files
+  });
+}
+
 function sanitizeFiles(files: LocalHistoryEntry["files"]): LocalHistoryEntry["files"] {
   const nextFiles: LocalHistoryEntry["files"] = {};
   if (typeof files.stl === "string") nextFiles.stl = files.stl;
