@@ -26,7 +26,7 @@ import {
   Users,
   Wand2
 } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { generateConcepts, generateModel, getHandshake, getRun, reviseConcept } from "../api";
 import { ModelViewer } from "../components/ModelViewer";
 import type { Concept, ConceptProgressEvent, HandshakeResponse, ModelCategory, ModelJobEvent, ModelRequest, ModelRun, ModelSubtype } from "../types";
@@ -1232,7 +1232,12 @@ function HistoryPage({ entries, onBack }: { entries: LocalHistoryEntry[]; onBack
 function HistoryRecordCard({ entry }: { entry: LocalHistoryEntry }) {
   const stlHref = getHistoryStlHref(entry);
   const dimensions = getModelDimensions(entry.input.targetLengthMm);
+  const inspection = getInspectionProfile(entry.input.category, dimensions);
   const selectedConcept = entry.concepts.find((concept) => concept.id === entry.selectedConceptId) ?? entry.concepts[0];
+  const [stlLoadFailed, setStlLoadFailed] = useState(false);
+  const handleStlLoadError = useCallback(() => setStlLoadFailed(true), []);
+  const stlFileName = getStlFileName(stlHref, entry.runId);
+  const stlState = stlHref ? (stlLoadFailed ? "STL 文件待恢复" : "STL 可下载") : "STL 未就绪";
 
   return (
     <article className="history-record-card">
@@ -1262,6 +1267,9 @@ function HistoryRecordCard({ entry }: { entry: LocalHistoryEntry }) {
                 status="Ready"
                 stlUrl={stlHref}
                 dimensions={dimensions}
+                viewMode="joint"
+                stlFallback="empty"
+                onStlLoadError={handleStlLoadError}
               />
             ) : (
               <ModelViewer
@@ -1294,6 +1302,14 @@ function HistoryRecordCard({ entry }: { entry: LocalHistoryEntry }) {
               <dd>{`${dimensions.length} x ${dimensions.width} x ${dimensions.height} mm`}</dd>
             </div>
             <div>
+              <dt>打印时间</dt>
+              <dd>{inspection.printTime}</dd>
+            </div>
+            <div>
+              <dt>STL 状态</dt>
+              <dd>{stlState}</dd>
+            </div>
+            <div>
               <dt>主色</dt>
               <dd><ColorValue value={entry.input.primaryColor} /></dd>
             </div>
@@ -1309,8 +1325,21 @@ function HistoryRecordCard({ entry }: { entry: LocalHistoryEntry }) {
               <dt>runId</dt>
               <dd>{entry.runId ?? "local-only"}</dd>
             </div>
+            <div>
+              <dt>STL 文件</dt>
+              <dd>{stlFileName}</dd>
+            </div>
+            <div>
+              <dt>STL 信息</dt>
+              <dd>{`${dimensions.length} mm / geometry only`}</dd>
+            </div>
           </dl>
           <p>{entry.input.description}</p>
+          <p className="history-stl-note">
+            {stlHref
+              ? "历史记录保存的是可打印 STL 几何文件入口；3D 窗口只显示 STL 网格预览，不再用旧参数模型代替成品。"
+              : "这条记录还没有可下载 STL，生成完成后会自动补上文件入口和 3D 预览。"}
+          </p>
           <div className="history-file-row">
             {stlHref ? (
               <a className="button primary" href={stlHref}>
@@ -1329,6 +1358,17 @@ function HistoryRecordCard({ entry }: { entry: LocalHistoryEntry }) {
       </div>
     </article>
   );
+}
+
+function getStlFileName(stlHref: string, runId: string | null) {
+  if (!stlHref) return "未生成";
+  try {
+    const url = new URL(stlHref, window.location.origin);
+    const fileName = url.pathname.split("/").filter(Boolean).pop();
+    if (fileName && fileName.includes(".")) return fileName;
+  } catch {
+  }
+  return `${runId ?? "model"}.stl`;
 }
 
 function ColorValue({ value }: { value: string }) {

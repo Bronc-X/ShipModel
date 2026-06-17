@@ -2447,6 +2447,13 @@ img {
   line-height: 1.5;
 }
 
+.history-detail-panel .history-stl-note {
+  border-left: 3px solid var(--tb-primary);
+  background: color-mix(in srgb, var(--tb-primary) 7%, var(--tb-surface-low));
+  padding: 8px 10px;
+  color: var(--tb-ink);
+}
+
 .history-param-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2474,6 +2481,7 @@ img {
   color: var(--tb-ink);
   font-size: 12px;
   font-weight: 800;
+  line-height: 1.45;
 }
 
 .history-color-value {

@@ -19,9 +19,11 @@ interface ModelViewerProps {
   wireframe?: boolean;
   pending?: boolean;
   viewMode?: "front" | "side" | "top" | "joint";
+  stlFallback?: "parametric" | "empty";
+  onStlLoadError?: () => void;
 }
 
-export function ModelViewer({ category, primaryColor, accentColor, status, stlUrl, dimensions, wireframe = false, pending = false, viewMode = "front" }: ModelViewerProps) {
+export function ModelViewer({ category, primaryColor, accentColor, status, stlUrl, dimensions, wireframe = false, pending = false, viewMode = "front", stlFallback = "parametric", onStlLoadError }: ModelViewerProps) {
   const mountRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -90,7 +92,12 @@ export function ModelViewer({ category, primaryColor, accentColor, status, stlUr
         },
         undefined,
         () => {
-          addParametricPreview(group, category, mainMaterial, accentMaterial, darkMaterial, dimensions);
+          onStlLoadError?.();
+          if (stlFallback === "parametric") {
+            addParametricPreview(group, category, mainMaterial, accentMaterial, darkMaterial, dimensions);
+          } else {
+            addUnavailableStlPreview(group, dimensions);
+          }
         }
       );
     } else {
@@ -145,7 +152,7 @@ export function ModelViewer({ category, primaryColor, accentColor, status, stlUr
       renderer.dispose();
       mount.removeChild(renderer.domElement);
     };
-  }, [accentColor, category, dimensions, pending, primaryColor, status, stlUrl, viewMode, wireframe]);
+  }, [accentColor, category, dimensions, onStlLoadError, pending, primaryColor, status, stlFallback, stlUrl, viewMode, wireframe]);
 
   return <div className="viewer-canvas" ref={mountRef} aria-label="3D model preview" />;
 }
@@ -251,6 +258,43 @@ function addPendingPreview(
     group.add(scanLine);
   });
 
+  applyDimensionScale(group, dimensions);
+}
+
+function addUnavailableStlPreview(
+  group: THREE.Group,
+  dimensions?: { length: number; width: number; height: number }
+) {
+  const baseMaterial = new THREE.MeshStandardMaterial({
+    color: "#e8eee9",
+    roughness: 0.84,
+    metalness: 0.02
+  });
+  const lineMaterial = new THREE.LineBasicMaterial({
+    color: "#006c49",
+    transparent: true,
+    opacity: 0.78
+  });
+  const slab = new THREE.Mesh(new THREE.BoxGeometry(2.7, 0.08, 1.7), baseMaterial);
+  slab.position.y = -0.16;
+  group.add(slab);
+
+  const bounds = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(2.7, 0.72, 1.7)), lineMaterial);
+  bounds.position.y = 0.16;
+  group.add(bounds);
+
+  const axis = new THREE.LineSegments(
+    new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-1.35, 0.19, -0.85),
+      new THREE.Vector3(1.35, 0.19, -0.85),
+      new THREE.Vector3(-1.35, 0.19, -0.85),
+      new THREE.Vector3(-1.35, 0.19, 0.85),
+      new THREE.Vector3(-1.35, 0.19, -0.85),
+      new THREE.Vector3(-1.35, 0.82, -0.85)
+    ]),
+    lineMaterial
+  );
+  group.add(axis);
   applyDimensionScale(group, dimensions);
 }
 
